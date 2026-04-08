@@ -1,0 +1,29 @@
+# --- General ---
+.DS_Store
+.env
+*.log
+
+# --- Server (FastAPI / Python) ---
+server/venv/
+server/__pycache__/
+server/*.pyc
+server/.env
+server/.pytest_cache/
+server/alembic/versions/*.pyc
+
+# --- Client (Next.js / Node) ---
+client/node_modules/
+client/.next/
+client/out/
+client/build/
+client/.env.local
+client/.vercel/
+
+SmallTownENV/
+__pycache__/
+*.pyc
+.env
+
+# --- IDE Settings ---
+.vscode/
+.idea/
