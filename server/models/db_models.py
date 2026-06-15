@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Integer, Numeric, Boolean, ForeignKey, DateTime
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
 from geoalchemy2 import Geography
 import uuid
@@ -30,6 +30,8 @@ class Property(Base):
     description = Column(String)
     type = Column(String, nullable=False)  # room, pg, flat
     price = Column(Numeric, nullable=False)
+    image_urls = Column(ARRAY(String), default=[])
+    
     coordinates = Column(Geography(geometry_type='POINT', srid=4326, spatial_index=True), nullable=False)
     
     is_verified = Column(Boolean, default=False)
