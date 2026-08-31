@@ -7,7 +7,7 @@ from database import get_db
 
 from api.properties import router as properties_router
 from api.auth import router as auth_router
-from services.ai_service import router as search_router
+from api.search import router as search_router
 
 app = FastAPI(title="Welcome to SmallTown Api", version="1.0.0")
 

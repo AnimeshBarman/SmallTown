@@ -16,7 +16,7 @@ def sync_user_profile(user_data: ProfileCreate, db: Session = Depends(get_db)):
         existing_profile = db.query(Profile).filter(Profile.id == user_data.id).first()
         
         if existing_profile:
-            return {"message": "Profile already exists", "profile_id": existing_profile.id}
+            return {"message": "Profile already exists"}
 
         new_profile = Profile(
             id=user_data.id,
