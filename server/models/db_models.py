@@ -1,49 +1,54 @@
-from sqlalchemy import Column, String, Integer, Numeric, Boolean, ForeignKey, DateTime
-from sqlalchemy.dialects.postgresql import UUID, ARRAY
-from sqlalchemy.sql import func
-from geoalchemy2 import Geography
 import uuid
-
 import sys
 import os
+from datetime import datetime
+from decimal import Decimal
+from typing import Any
+from sqlalchemy import String, Integer, Numeric, Boolean, ForeignKey, DateTime
+from sqlalchemy.dialects.postgresql import UUID, ARRAY
+from sqlalchemy.sql import func
+from sqlalchemy.orm import Mapped, mapped_column
+from geoalchemy2 import Geography
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import Base
 
 class Profile(Base):
     __tablename__ = "profiles"
     
-    id = Column(UUID(as_uuid=True), primary_key=True)
-    fullname = Column(String)
-    email = Column(String, unique=True)
-    avatar_url = Column(String)
-    role = Column(String, default="seeker")
-    phone = Column(String)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    fullname: Mapped[str | None] = mapped_column(String, nullable=True)
+    email: Mapped[str ] = mapped_column(String, unique=True)
+    avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    role: Mapped[str] = mapped_column(String, default="seeker")
+    phone: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 class Property(Base):
     __tablename__ = "properties"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    owner_id = Column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"))
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"))
     
-    title = Column(String, nullable=False)
-    description = Column(String)
-    type = Column(String, nullable=False)  # room, pg, flat
-    price = Column(Numeric, nullable=False)
-    image_urls = Column(ARRAY(String), default=[])
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    area: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+    type: Mapped[str] = mapped_column(String, nullable=False)  # room, pg, flat
+    price: Mapped[Decimal] = mapped_column(Numeric, nullable=False) 
+    image_urls: Mapped[list[str]] = mapped_column(ARRAY(String), default=[])
     
-    coordinates = Column(Geography(geometry_type='POINT', srid=4326, spatial_index=True), nullable=False)
+    coordinates: Mapped[Any] = mapped_column(Geography(geometry_type='POINT', srid=4326, spatial_index=True), nullable=False)
     
-    is_verified = Column(Boolean, default=False)
-    view_count = Column(Integer, default=0)
-    status = Column(String, default="active")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    view_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 
 class Landmark(Base):
     __tablename__ = "landmarks"
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    city_id = Column(UUID(as_uuid=True), ForeignKey("cities.id", ondelete="CASCADE"))
-    name = Column(String, nullable=False)
-    coordinates = Column(Geography(geometry_type='POINT', srid=4326), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    city_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("cities.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    coordinates: Mapped[Any] = mapped_column(Geography(geometry_type='POINT', srid=4326), nullable=False)

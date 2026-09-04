@@ -35,6 +35,7 @@ def create_property(
         point_str = f"POINT({property_data.longitude} {property_data.latitude})"
         new_property = Property(
             title=property_data.title,
+            area=property_data.area,
             description=property_data.description,
             type=property_data.type,
             price=property_data.price,

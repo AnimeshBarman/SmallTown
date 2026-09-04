@@ -16,26 +16,25 @@ security = HTTPBearer()
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
 
 if not SUPABASE_JWT_SECRET:
-    raise RuntimeError("SUPABASE_JWT_SECRET environment variable is not set. Please set it in your .env..!")
+    raise RuntimeError("SUPABASE_JWT_SECRET environment variable is not set.")
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Validates the JWT and returns the Supabase user ID."""
     token = credentials.credentials
-    
     try:
         payload = jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
-        
         user_id = payload.get("sub")
-
-        user_id = str(user_id)
-
-        if user_id is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token format..!")
-            
-    except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials..!")
         
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token format.")
+            
+        return str(user_id)
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials.")
+
+def get_current_user(user_id: str = Depends(verify_token), db: Session = Depends(get_db)):
+    """Fetches the user profile from the database."""
     user = db.query(Profile).filter(Profile.id == user_id).first()
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found..!")
-        
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found.")
     return user

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 import sys
@@ -7,16 +7,30 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import get_db
 from models.db_models import Profile
 from schemas.user_schema import ProfileCreate
+from dependencies import verify_token
 
 router = APIRouter()
 
 @router.post("/sync-profile")
-def sync_user_profile(user_data: ProfileCreate, db: Session = Depends(get_db)):
+def sync_user_profile(
+    user_data: ProfileCreate,
+    token_user_id: str = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
+
+    if str(user_data.id) != token_user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot sync profile for another user..!")
+    
     try:
         existing_profile = db.query(Profile).filter(Profile.id == user_data.id).first()
         
         if existing_profile:
-            return {"message": "Profile already exists"}
+            # Update existing data (Upsert)
+            existing_profile.email = user_data.email
+            existing_profile.fullname = user_data.fullname
+            existing_profile.avatar_url = user_data.avatar_url
+            db.commit()
+            return {"message": "Profile updated successfully", "profile_id": existing_profile.id}
 
         new_profile = Profile(
             id=user_data.id,
