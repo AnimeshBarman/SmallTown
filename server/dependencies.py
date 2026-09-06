@@ -8,26 +8,25 @@ from pathlib import Path
 
 from database import get_db
 from models.db_models import Profile
+from security import (SECRET_KEY, ALGORITHM)
 
 env_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
 security = HTTPBearer()
-SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
 
-if not SUPABASE_JWT_SECRET:
-    raise RuntimeError("SUPABASE_JWT_SECRET environment variable is not set.")
 
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     """Validates the JWT and returns the Supabase user ID."""
     token = credentials.credentials
     try:
-        payload = jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("sub")
+        token_type = payload.get("type")
         
-        if not user_id:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token format.")
-            
+        if not user_id or token_type != "access":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type or credentials.")
+         
         return str(user_id)
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials.")

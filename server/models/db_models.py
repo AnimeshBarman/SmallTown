@@ -22,6 +22,8 @@ class Profile(Base):
     avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
     role: Mapped[str] = mapped_column(String, default="seeker")
     phone: Mapped[str | None] = mapped_column(String, nullable=True)
+    hashed_password: Mapped[str | None] = mapped_column(String, nullable=True)
+    refresh_token: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 class Property(Base):

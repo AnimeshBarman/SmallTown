@@ -8,3 +8,16 @@ class ProfileCreate(BaseModel):
     fullname: Optional[str] = None
     avatar_url: Optional[str] = None
     role: str = "seeker"
+
+class UserSignup(BaseModel):
+    email: EmailStr
+    password: str
+    fullname: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
