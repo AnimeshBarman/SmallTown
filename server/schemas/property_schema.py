@@ -1,15 +1,16 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 from datetime import datetime
+from decimal import Decimal
 
 class PropertyBase(BaseModel):
     title: str = Field(..., min_length=5, max_length=100, description="Property title")
-    area: Optional[str] = None
+    area: str = Field(..., min_length=5, max_length=100, description="Area or Locality name")
     description: Optional[str] = None
-    type: str = Field(..., description="Must be room, pg, or flat")
-    price: float = Field(..., gt=0, description="Price should be greater than 0")
-
+    type: str = Field(...,pattern="^(room|pg|flat)$", description="Must be room, pg, or flat")
+    price: Decimal = Field(..., gt=0, description="Price should be greater than 0")
+    image_urls: List[str] = Field(default=[], max_length=3, description="Upto 3 image URLs")
 
 class PropertyCreate(PropertyBase):
     latitude: float = Field(..., description="Map Latitude")

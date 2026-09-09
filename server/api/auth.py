@@ -21,7 +21,7 @@ router = APIRouter()
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 def signup(user_data: UserSignup, db: Session = Depends(get_db)):
     if db.query(Profile).filter(Profile.email == user_data.email).first():
-        raise HTTPException(status_code=400, detail="Email already registered.")
+        raise HTTPException(status_code=400, detail="Email already registered..!")
         
     new_profile = Profile(
         id=uuid.uuid4(),

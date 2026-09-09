@@ -1,63 +1,80 @@
 import os
-import uuid
 import io
+import uuid
 from fastapi import UploadFile, HTTPException
+from PIL import Image
 from supabase import create_client, Client
-from PIL import Image, UnidentifiedImageError
+from dotenv import load_dotenv
 
-supabase_url = os.environ.get("SUPABASE_URL", "")
-supabase_key = os.environ.get("SUPABASE_ANON_KEY", "")
+load_dotenv()
 
-if not supabase_url or not supabase_key:
-    raise RuntimeError("Supabase keys missing in .env file..!")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+# SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
-supabase: Client = create_client(supabase_url, supabase_key)
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("Supabase credentials missing in .env..!")
 
-MAX_FILE_SIZE_MB = 5  
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+BUCKET_NAME = "property-images"
 
-async def upload_property_images(files: list[UploadFile], property_id: str) -> list[str]:
-    uploaded_urls = []
+ALLOWED_EXTENSIONS = {"image/jpeg", "image/png", "image/webp", "image/jpg"}
+MAX_FILE_SIZE_MB = 2 * 1024 * 1024  
+
+async def process_and_upload_image(file: UploadFile) -> str:
+    if file.content_type not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Invalid file type: {file.content_type}")
+
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_FILE_SIZE_MB:
+        raise HTTPException(status_code=413, detail="File too large. Max 2MB allowed per image.")
+
+    try:
+        image = Image.open(io.BytesIO(file_bytes))
+        
+        # Convert to RGBA
+        if image.mode in ("RGBA", "P"):
+            image = image.convert("RGB")
+        
+        # Image Resizing
+        max_width = 1024
+        if image.width > max_width:
+            ratio = max_width / float(image.width)
+            new_height = int((float(image.height) * float(ratio)))
+            image = image.resize((max_width, new_height), Image.Resampling.LANCZOS)
+
+        # Extreme Compression in WebP format
+        output_io = io.BytesIO()
+        image.save(output_io, format="WEBP", quality=75, method=6)
+        output_io.seek(0)
+        
+        file_name = f"{uuid.uuid4()}.webp"
+        
+        supabase.storage.from_(BUCKET_NAME).upload(
+            path=file_name,
+            file=output_io.read(),
+            file_options={"content-type": "image/webp"}
+        )
+        
+        return supabase.storage.from_(BUCKET_NAME).get_public_url(file_name)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Image processing failed: {str(e)}")
+
+
+def delete_images_from_storage(image_urls: list[str]):
+    if not image_urls:
+        return
     
-    for file in files:
-        file_bytes = await file.read()
-        
-        if len(file_bytes) > (MAX_FILE_SIZE_MB * 1024 * 1024):
-            raise HTTPException(status_code=400, detail=f"File {file.filename} exceeds {MAX_FILE_SIZE_MB}MB limit.")
-        
+    filenames = []
+    for url in image_urls:
+        filename = url.split("/")[-1]
+        filenames.append(filename)
+    
+    if filenames:
         try:
-            img = Image.open(io.BytesIO(file_bytes))
-            
-            if img.format not in ["JPEG", "PNG", "WEBP"]:
-                raise HTTPException(status_code=400, detail="Only JPG, PNG, and WEBP formats are allowed.")
-
-            
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
-                
-            img.thumbnail((1280, 1280)) 
-
-            compressed_io = io.BytesIO()
-            img.save(compressed_io, format="WEBP", quality=75, optimize=True)
-            compressed_bytes = compressed_io.getvalue()
-            
-        except UnidentifiedImageError:
-            raise HTTPException(status_code=400, detail=f"File {file.filename} is corrupted or fake..!")
+            supabase.storage.from_(BUCKET_NAME).remove(filenames)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Image processing failed: {str(e)}")
-
-        try:
-            unique_filename = f"properties/{property_id}/{uuid.uuid4()}.webp"
-            
-            response = supabase.storage.from_("property-images").upload(
-                file=compressed_bytes,
-                path=unique_filename,
-                file_options={"content-type": "image/webp"}
-            )
-            
-            public_url = supabase.storage.from_("property-images").get_public_url(unique_filename)
-            uploaded_urls.append(public_url)
-            
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to upload to storage: {str(e)}")
-            
-    return uploaded_urls
+            # We print instead of raise so a storage failure doesn't 
+            # prevent the DB row from being deleted.
+            print(f"Warning: Failed to delete physical images: {e}")
