@@ -24,9 +24,9 @@ def get_all_properties(db: Session = Depends(get_db)):
     properties = db.query(Property).filter(Property.status == "active").all()
     return properties
 
-@router.post("/test-single-upload")
-async def test_single_upload(file: UploadFile = File(...)):
-    return {"filename": file.filename}
+# @router.post("/test-single-upload")
+# async def test_single_upload(file: UploadFile = File(...)):
+#     return {"filename": file.filename}
 
 @router.post("/upload-images")
 async def upload_property_images(
@@ -51,7 +51,7 @@ async def upload_property_images(
 
 
 
-@router.post("/", response_model=PropertyResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/create-property", response_model=PropertyResponse, status_code=status.HTTP_201_CREATED)
 def create_property(
     property_data: PropertyCreate, 
     db: Session = Depends(get_db),

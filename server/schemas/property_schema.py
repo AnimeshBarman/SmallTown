@@ -6,7 +6,8 @@ from decimal import Decimal
 
 class PropertyBase(BaseModel):
     title: str = Field(..., min_length=5, max_length=100, description="Property title")
-    area: str = Field(..., min_length=5, max_length=100, description="Area or Locality name")
+    # area: str = Field(..., min_length=5, max_length=100, description="Area or Locality name")
+    area: Optional[str] = None
     description: Optional[str] = None
     type: str = Field(...,pattern="^(room|pg|flat)$", description="Must be room, pg, or flat")
     price: Decimal = Field(..., gt=0, description="Price should be greater than 0")
