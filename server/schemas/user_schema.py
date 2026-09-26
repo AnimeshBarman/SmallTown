@@ -1,6 +1,6 @@
 from typing import Literal
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class ProfileCreate(BaseModel):
@@ -9,7 +9,7 @@ class ProfileCreate(BaseModel):
     id: UUID
     email: EmailStr
     fullname: str | None = None
-    avatar_url: HttpUrl | str | None = None
+    avatar_url: str | None = None
     role: Literal["seeker", "owner", "admin"] = "seeker"
 
 
@@ -17,7 +17,7 @@ class UserSignup(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     email: EmailStr
-    password: str = Field(..., min_length=8, max_length=50, description="Password must be at least 8 characters")
+    password: str = Field(..., min_length=8, max_length=64, description="Password must be at least 8 characters")
     fullname: str = Field(..., min_length=2, max_length=100)
 
 

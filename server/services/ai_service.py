@@ -15,8 +15,7 @@ client = Groq(api_key=GROQ_API_KEY)
 
 def extract_search_intent(user_query: str) -> dict:
     """
-    Utilizes Groq's Llama-3.1 model with native JSON mode 
-    to extract real estate search parameters deterministically.
+    Utilizes Groq's model with native JSON mode.
     """
     try:
         system_prompt = (
