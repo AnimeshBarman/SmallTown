@@ -1,4 +1,3 @@
-import os
 import uuid
 import bcrypt
 from datetime import datetime, timedelta, timezone
@@ -6,10 +5,9 @@ from jose import jwt
 from dotenv import load_dotenv
 from config import settings
 
-load_dotenv()
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "")
-ALGORITHM = "HS256"
+SECRET_KEY = settings.JWT_SECRET_KEY
+ALGORITHM = settings.JWT_ALGORITHM
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
@@ -34,7 +32,8 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     # expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({
         "exp": expire, 
-        "jti": str(uuid.uuid4())
+        "jti": str(uuid.uuid4()),
+        "type": "access"
     })
 
     encode_jwt = jwt.encode(

@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, status
 from sqlalchemy.orm import Session
-from typing import List, Annotated
+from typing import List
 from geoalchemy2.elements import WKTElement
 
 import sys
 import os
 from uuid import UUID
+from starlette.concurrency import run_in_threadpool
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import get_db
 from models.db_models import Property
@@ -35,15 +36,21 @@ async def upload_property_images(
     ):
     if len(files) > 3:
         raise HTTPException(status_code=400, detail="Maximum of 3 images allowed per property.")
-    if len(files) == 0:
+    if not files:
         raise HTTPException(status_code=400, detail="No images provided.")
 
     uploaded_urls = []
-    
-    for file in files:
-        url = await process_and_upload_image(file)
-        uploaded_urls.append(url)
-        
+
+    try:
+        for file in files:
+            url = await process_and_upload_image(file)
+            uploaded_urls.append(url)
+
+    except Exception:
+        if uploaded_urls:
+            await run_in_threadpool(delete_images_from_storage, uploaded_urls)
+        raise
+            
     return {
         "message": "Images successfully processed and uploaded.",
         "urls": uploaded_urls
@@ -83,7 +90,7 @@ def create_property(
 
 
 @router.delete("/{property_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_property(
+async def delete_property(
     property_id: UUID,
     db: Session = Depends(get_db),
     current_user: Profile = Depends(get_current_user)
@@ -97,7 +104,7 @@ def delete_property(
         raise HTTPException(status_code=403, detail="Not authorized to delete this property.")
 
     if property_record.image_urls:
-        delete_images_from_storage(property_record.image_urls)
+        await delete_images_from_storage(property_record.image_urls)
         
     db.delete(property_record)
     db.commit()

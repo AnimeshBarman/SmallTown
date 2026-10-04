@@ -2,14 +2,25 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from contextlib import asynccontextmanager
 import uvicorn
-from database import get_db
+from database import get_db, engine
+from models.db_models import Base
 
 from api.properties import router as properties_router
 from api.auth import router as auth_router
 from api.search import router as search_router
 
-app = FastAPI(title="Welcome to SmallTown Api", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    with engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis;"))
+        Base.metadata.create_all(bind=conn)
+
+    yield
+
+app = FastAPI(lifespan=lifespan, title="Welcome to SmallTown Api", version="1.0.0")
 
 origins = [
     "http://localhost:3000"
@@ -26,6 +37,8 @@ app.add_middleware(
 app.include_router(properties_router, prefix="/api/v1/properties", tags=["Properties"])
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(search_router, prefix="/api/v1/search", tags=["AI Search"])
+
+
 
 
 @app.get("/")
