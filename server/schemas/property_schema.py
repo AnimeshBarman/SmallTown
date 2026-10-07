@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Optional, List, Literal
 from uuid import UUID
 from datetime import datetime
 from decimal import Decimal
@@ -9,9 +9,9 @@ class PropertyBase(BaseModel):
     # area: str = Field(..., min_length=5, max_length=100, description="Area or Locality name")
     area: Optional[str] = None
     description: Optional[str] = None
-    type: str = Field(...,pattern="^(room|pg|flat)$", description="Must be room, pg, or flat")
+    type: Literal["room", "pg", "flat"]
     price: Decimal = Field(..., gt=0, description="Price should be greater than 0")
-    image_urls: List[str] = Field(default=[], max_length=3, description="Upto 3 image URLs")
+    image_urls: list[str] = Field(default_factory=list, max_length=3, description="Upto 3 image URLs")
 
 class PropertyCreate(PropertyBase):
     latitude: float = Field(..., description="Map Latitude")
@@ -19,12 +19,11 @@ class PropertyCreate(PropertyBase):
 
 
 class PropertyResponse(PropertyBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
-    owner_id: Optional[UUID] = None
+    owner_id: UUID
     is_verified: bool
     view_count: int
     status: str
     created_at: datetime
-
-    class Config:
-        from_attributes = True

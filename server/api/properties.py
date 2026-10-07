@@ -6,7 +6,6 @@ from geoalchemy2.elements import WKTElement
 import sys
 import os
 from uuid import UUID
-from starlette.concurrency import run_in_threadpool
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import get_db
 from models.db_models import Property
@@ -25,15 +24,16 @@ def get_all_properties(db: Session = Depends(get_db)):
     properties = db.query(Property).filter(Property.status == "active").all()
     return properties
 
-# @router.post("/test-single-upload")
-# async def test_single_upload(file: UploadFile = File(...)):
-#     return {"filename": file.filename}
+
 
 @router.post("/upload-images")
 async def upload_property_images(
     files: list[UploadFile] = File(..., description="Upload up to 3 images"),
     current_user: Profile = Depends(get_current_user)
     ):
+    if current_user.role not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="Not authorized..!")
+
     if len(files) > 3:
         raise HTTPException(status_code=400, detail="Maximum of 3 images allowed per property.")
     if not files:
@@ -48,7 +48,7 @@ async def upload_property_images(
 
     except Exception:
         if uploaded_urls:
-            await run_in_threadpool(delete_images_from_storage, uploaded_urls)
+            await delete_images_from_storage(uploaded_urls)
         raise
             
     return {
@@ -64,6 +64,9 @@ def create_property(
     db: Session = Depends(get_db),
     current_user: Profile = Depends(get_current_user)
     ):
+    if current_user.role not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="Not authorized..!")
+    
     try:
         point_str = f"POINT({property_data.longitude} {property_data.latitude})"
         new_property = Property(

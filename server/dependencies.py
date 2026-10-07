@@ -16,7 +16,7 @@ security = HTTPBearer()
 
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-    """Validates the JWT and returns the Supabase user ID."""
+# Validates the JWT and returns the Supabase user ID
     token = credentials.credentials
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -31,7 +31,7 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) 
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials.")
 
 def get_current_user(user_id: str = Depends(verify_token), db: Session = Depends(get_db)):
-    """Fetches the user profile from the database."""
+# Fetches the user profile from the database
     user = db.query(Profile).filter(Profile.id == user_id).first()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found.")

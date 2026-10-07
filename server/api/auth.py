@@ -101,7 +101,7 @@ def sync_user_profile(
             email=user_data.email,
             fullname=user_data.fullname,
             avatar_url=user_data.avatar_url,
-            role=user_data.role
+            role="seeker"
         )
 
         db.add(new_profile)

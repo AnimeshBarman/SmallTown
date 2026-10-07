@@ -23,7 +23,6 @@ CACHE_TTL_SECONDS = 86400 #1day TTL
 @router.post("/nlp", response_model=List[PropertyResponse], dependencies=[Depends(rate_limit_by_ip)])
 async def ai_powered_search(request: SearchRequest, db: Session = Depends(get_db)):
     try:
-
         normalized_query = " ".join(request.query.strip().lower().split())
         cache_key = f"search_cache:{normalized_query}"
 
@@ -43,18 +42,22 @@ async def ai_powered_search(request: SearchRequest, db: Session = Depends(get_db
             query = query.filter(Property.price <= search_params['max_price'])
 
         if search_params.get('landmark'):
-            landmark = db.query(Landmark).filter(
-                func.lower(Landmark.name).contains(search_params['landmark'].lower())
-            ).first()
-            
+            landmark = (
+                db.query(Landmark)
+                .filter(
+                    func.lower(Landmark.name).contains(
+                        search_params['landmark'].lower()
+                    )
+                ).first()
+            )
             if landmark:
                 query = query.filter(func.ST_DWithin(Property.coordinates, landmark.coordinates, 3000))
 
-            results = query.all()
+        results = query.all()
 
-            # Serialize Pydantic/ORM results to JSON and store in Redis for 24 hours
-            serialized_data = [PropertyResponse.model_validate(p).model_dump(mode="json") for p in results]
-            await redis_client.setex(cache_key, CACHE_TTL_SECONDS, json.dumps(serialized_data))
+        # Serialize Pydantic/ORM results to JSON and store in Redis for 24 hours
+        serialized_data = [PropertyResponse.model_validate(p).model_dump(mode="json") for p in results]
+        await redis_client.setex(cache_key, CACHE_TTL_SECONDS, json.dumps(serialized_data))
 
         return results
 

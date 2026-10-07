@@ -33,7 +33,7 @@ class Property(Base):
     owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"))
     
     title: Mapped[str] = mapped_column(String, nullable=False)
-    area: Mapped[str] = mapped_column(String, nullable=False)
+    area: Mapped[str] = mapped_column(String, nullable=True)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     type: Mapped[str] = mapped_column(String, nullable=False)  # room, pg, flat
     price: Mapped[Decimal] = mapped_column(Numeric, nullable=False) 

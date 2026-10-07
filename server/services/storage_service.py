@@ -9,11 +9,9 @@ from starlette.concurrency import run_in_threadpool
 from supabase import create_client, Client
 from config import settings
 
-# load_dotenv()
 logger = logging.getLogger(__name__)
 
-# SUPABASE_URL = os.environ.get("SUPABASE_URL")
-# SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+
 
 if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
     raise RuntimeError("Supabase credentials missing in .env..!")
@@ -109,32 +107,6 @@ def _process_and_upload_image(file_bytes: bytes, expected_format: str) -> str:
         ) from exc
 
     
-    #     # Image Resizing
-    #     max_width = 1024
-    #     if image.width > max_width:
-    #         ratio = max_width / float(image.width)
-    #         new_height = int((float(image.height) * float(ratio)))
-    #         image = image.resize((max_width, new_height), Image.Resampling.LANCZOS)
-
-    #     # Extreme Compression in WebP format
-    #     output_io = io.BytesIO()
-    #     image.save(output_io, format="WEBP", quality=75, method=6)
-    #     output_io.seek(0)
-        
-    #     file_name = f"{uuid.uuid4()}.webp"
-        
-    #     supabase.storage.from_(BUCKET_NAME).upload(
-    #         path=file_name,
-    #         file=output_io.read(),
-    #         file_options={"content-type": "image/webp"}
-    #     )
-        
-    #     return supabase.storage.from_(BUCKET_NAME).get_public_url(file_name)
-
-    # except Exception as e:
-    #     raise HTTPException(status_code=500, detail=f"Image processing failed: {str(e)}")
-
-
 async def delete_images_from_storage(image_urls: list[str]) -> None:
     if not image_urls:
         return

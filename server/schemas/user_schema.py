@@ -10,7 +10,7 @@ class ProfileCreate(BaseModel):
     email: EmailStr
     fullname: str | None = None
     avatar_url: str | None = None
-    role: Literal["seeker", "owner", "admin"] = "seeker"
+    # role: Literal["seeker", "owner", "admin"] = "seeker"
 
 
 class UserSignup(BaseModel):

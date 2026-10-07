@@ -1,9 +1,6 @@
 import redis.asyncio as redis
-import os
 from config import settings
 
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
 redis_client = redis.from_url(
     settings.REDIS_URL,
@@ -11,9 +8,5 @@ redis_client = redis.from_url(
     decode_responses=True
 )
 
-async def check_redis_connection():
-    try:
+async def check_redis_connection() -> None:
         await redis_client.ping()
-        print("Connected to Redis successfully.")
-    except Exception as e:
-        print(f"Redis Connection Failed: {e}")

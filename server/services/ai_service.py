@@ -1,22 +1,17 @@
-import os
 import json
 import re
 from groq import Groq
-from dotenv import load_dotenv
+from config import settings
 
 
-load_dotenv()
-
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_API_KEY = settings.GROQ_API_KEY
 if not GROQ_API_KEY:
     raise RuntimeError("GROQ_API_KEY is missing in your .env file!")
 
 client = Groq(api_key=GROQ_API_KEY)
 
 def extract_search_intent(user_query: str) -> dict:
-    """
-    Utilizes Groq's model with native JSON mode.
-    """
+# Utilizes Groq's model with native JSON mode.
     try:
         system_prompt = (
             "You are a real estate assistant. Extract search parameters from the user query. "
