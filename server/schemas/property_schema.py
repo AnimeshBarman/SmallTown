@@ -22,7 +22,7 @@ class PropertyResponse(PropertyBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    owner_id: UUID
+    owner_id: Optional[UUID] = None
     is_verified: bool
     view_count: int
     status: str

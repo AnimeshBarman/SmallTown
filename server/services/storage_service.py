@@ -129,7 +129,4 @@ def _delete_images_from_storage(image_urls: list[str]) -> None:
     try:
         supabase.storage.from_(BUCKET_NAME).remove(filenames)
     except Exception:
-            # We print instead of raise so a storage failure doesn't 
-            # prevent the DB row from being deleted.
-            # print(f"Warning: Failed to delete physical images: {e}")
             logger.exception("Failed to delete images from Supabase Storage..!")
