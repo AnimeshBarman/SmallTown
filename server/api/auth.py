@@ -1,7 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from jose import JWTError, jwt
+from google.auth.exceptions import GoogleAuthError, TransportError
+from google.auth.transport.requests import Request as GoogleRequest
+from google.oauth2 import id_token as google_id_token
 
 import sys
 import os
@@ -9,14 +13,34 @@ import uuid
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import get_db
 from models.db_models import Profile
-from schemas.user_schema import (ProfileCreate, UserSignup, TokenResponse, RefreshRequest)
+from schemas.user_schema import (
+    GoogleLoginRequest,
+    ProfileCreate,
+    UserSignup,
+    TokenResponse,
+    RefreshRequest,
+)
 from dependencies import (verify_token, get_current_user)
 from security import (
     get_password_hash, verify_password, create_access_token, 
     create_refresh_token, SECRET_KEY, ALGORITHM
 )
+from config import settings
 
 router = APIRouter()
+
+
+def _create_session_tokens(user: Profile, db: Session) -> dict[str, str]:
+    access_token = create_access_token(data={"sub": str(user.id)})
+    refresh_token = create_refresh_token(data={"sub": str(user.id)})
+    user.refresh_token = refresh_token
+    db.commit()
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+    }
+
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 def signup(user_data: UserSignup, db: Session = Depends(get_db)):
@@ -40,14 +64,64 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     
     if not user or not user.hashed_password or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials..!")
-        
-    access_token = create_access_token(data={"sub": str(user.id)})
-    refresh_token = create_refresh_token(data={"sub": str(user.id)})
-    
-    user.refresh_token = refresh_token
-    db.commit()
-    
-    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+    return _create_session_tokens(user, db)
+
+
+@router.post("/google", response_model=TokenResponse)
+def google_login(request: GoogleLoginRequest, db: Session = Depends(get_db)):
+    if not settings.GOOGLE_CLIENT_ID:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google login is not configured.",
+        )
+
+    try:
+        claims = google_id_token.verify_oauth2_token(
+            request.id_token,
+            GoogleRequest(),
+            audience=settings.GOOGLE_CLIENT_ID,
+        )
+    except TransportError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google token verification is temporarily unavailable.",
+        ) from None
+    except (ValueError, GoogleAuthError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Google ID token.",
+        ) from None
+
+    email = claims.get("email")
+    subject = claims.get("sub")
+    if (
+        not isinstance(email, str)
+        or not email
+        or not isinstance(subject, str)
+        or not subject
+        or claims.get("email_verified") is not True
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Google account must have a verified email address.",
+        )
+
+    normalized_email = email.lower()
+    user = db.query(Profile).filter(func.lower(Profile.email) == normalized_email).first()
+    if user is None:
+        fullname = claims.get("name")
+        avatar_url = claims.get("picture")
+        user = Profile(
+            id=uuid.uuid4(),
+            email=normalized_email,
+            fullname=fullname if isinstance(fullname, str) else None,
+            avatar_url=avatar_url if isinstance(avatar_url, str) else None,
+            role="seeker",
+        )
+        db.add(user)
+        db.flush()
+
+    return _create_session_tokens(user, db)
 
 @router.post("/refresh", response_model=TokenResponse)
 def refresh_token(request: RefreshRequest, db: Session = Depends(get_db)):
