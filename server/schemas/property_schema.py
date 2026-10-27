@@ -23,6 +23,8 @@ class PropertyResponse(PropertyBase):
 
     id: UUID
     owner_id: Optional[UUID] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     is_verified: bool
     view_count: int
     status: str

@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, status
 from sqlalchemy.orm import Session
+from sqlalchemy import cast, func
 from typing import List
+from geoalchemy2 import Geometry
 from geoalchemy2.elements import WKTElement
 
 import sys
@@ -21,8 +23,23 @@ router = APIRouter()
 
 @router.get("/", response_model=List[PropertyResponse])
 def get_all_properties(db: Session = Depends(get_db)):
-    properties = db.query(Property).filter(Property.status == "active").all()
-    return properties
+    property_rows = (
+        db.query(
+            Property,
+            func.ST_Y(cast(Property.coordinates, Geometry)).label("latitude"),
+            func.ST_X(cast(Property.coordinates, Geometry)).label("longitude"),
+        )
+        .filter(Property.status == "active")
+        .all()
+    )
+    return [
+        {
+            **PropertyResponse.model_validate(property_record).model_dump(),
+            "latitude": latitude,
+            "longitude": longitude,
+        }
+        for property_record, latitude, longitude in property_rows
+    ]
 
 
 
@@ -31,9 +48,6 @@ async def upload_property_images(
     files: list[UploadFile] = File(..., description="Upload up to 3 images"),
     current_user: Profile = Depends(get_current_user)
     ):
-    if current_user.role not in {"owner", "admin"}:
-        raise HTTPException(status_code=403, detail="Not authorized..!")
-
     if len(files) > 3:
         raise HTTPException(status_code=400, detail="Maximum of 3 images allowed per property.")
     if not files:
@@ -64,9 +78,6 @@ def create_property(
     db: Session = Depends(get_db),
     current_user: Profile = Depends(get_current_user)
     ):
-    if current_user.role not in {"owner", "admin"}:
-        raise HTTPException(status_code=403, detail="Not authorized..!")
-    
     try:
         point_str = f"POINT({property_data.longitude} {property_data.latitude})"
         new_property = Property(
