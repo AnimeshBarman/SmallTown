@@ -1,10 +1,10 @@
 import uuid
 import sys
 import os
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
-from sqlalchemy import String, Integer, Numeric, Boolean, ForeignKey, DateTime
+from sqlalchemy import String, Integer, Numeric, Boolean, ForeignKey, DateTime, Date
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -34,6 +34,9 @@ class Property(Base):
     
     title: Mapped[str] = mapped_column(String, nullable=False)
     area: Mapped[str] = mapped_column(String, nullable=True)
+    address: Mapped[str] = mapped_column(String, nullable=False)
+    city: Mapped[str] = mapped_column(String, nullable=False)
+    contact_phone: Mapped[str | None] = mapped_column(String, nullable=True)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     type: Mapped[str] = mapped_column(String, nullable=False)  # room, pg, flat
     price: Mapped[Decimal] = mapped_column(Numeric, nullable=False) 
@@ -46,12 +49,38 @@ class Property(Base):
     status: Mapped[str] = mapped_column(String, default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+
+class SavedProperty(Base):
+    __tablename__ = "saved_properties"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), primary_key=True
+    )
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("properties.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PropertyView(Base):
+    __tablename__ = "property_views"
+
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("properties.id", ondelete="CASCADE"), primary_key=True
+    )
+    visitor_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    viewed_on: Mapped[date] = mapped_column(Date, primary_key=True)
+
+
 class City(Base):
     __tablename__ = "cities"
     
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     state: Mapped[str | None] = mapped_column(String, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    center_latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    center_longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 class Landmark(Base):

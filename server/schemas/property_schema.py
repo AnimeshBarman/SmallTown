@@ -1,13 +1,16 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Literal
+from typing import Optional, Literal
 from uuid import UUID
 from datetime import datetime
 from decimal import Decimal
+import re
+from pydantic import field_validator
 
 class PropertyBase(BaseModel):
     title: str = Field(..., min_length=5, max_length=100, description="Property title")
-    # area: str = Field(..., min_length=5, max_length=100, description="Area or Locality name")
-    area: Optional[str] = None
+    area: str = Field(..., min_length=2, max_length=100, description="Area or locality")
+    address: str = Field(..., min_length=5, max_length=250, description="Full property address")
+    city: str = Field(..., min_length=2, max_length=100)
     description: Optional[str] = None
     type: Literal["room", "pg", "flat"]
     price: Decimal = Field(..., gt=0, description="Price should be greater than 0")
@@ -16,11 +19,23 @@ class PropertyBase(BaseModel):
 class PropertyCreate(PropertyBase):
     latitude: float = Field(..., description="Map Latitude")
     longitude: float = Field(..., description="Map Longitude")
+    contact_phone: str = Field(..., min_length=7, max_length=30)
+
+    @field_validator("contact_phone")
+    @classmethod
+    def validate_contact_phone(cls, value: str) -> str:
+        normalized = value.strip()
+        if not re.fullmatch(r"[+0-9()\-\s]{7,30}", normalized):
+            raise ValueError("Enter a valid contact phone number.")
+        return normalized
 
 
 class PropertyResponse(PropertyBase):
     model_config = ConfigDict(from_attributes=True)
 
+    area: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
     id: UUID
     owner_id: Optional[UUID] = None
     latitude: Optional[float] = None
@@ -29,3 +44,14 @@ class PropertyResponse(PropertyBase):
     view_count: int
     status: str
     created_at: datetime
+
+
+class PropertyDetailResponse(PropertyResponse):
+    contact_phone: Optional[str] = None
+
+
+class PropertyPageResponse(BaseModel):
+    items: list[PropertyResponse]
+    total: int
+    limit: int
+    offset: int

@@ -19,6 +19,8 @@ from schemas.user_schema import (
     UserSignup,
     TokenResponse,
     RefreshRequest,
+    ProfileResponse,
+    ProfileUpdate,
 )
 from dependencies import (verify_token, get_current_user)
 from security import (
@@ -28,6 +30,24 @@ from security import (
 from config import settings
 
 router = APIRouter()
+
+
+@router.get("/me", response_model=ProfileResponse)
+def get_my_profile(current_user: Profile = Depends(get_current_user)):
+    return current_user
+
+
+@router.patch("/me", response_model=ProfileResponse)
+def update_my_profile(
+    profile_data: ProfileUpdate,
+    current_user: Profile = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    for field, value in profile_data.model_dump(exclude_unset=True).items():
+        setattr(current_user, field, value)
+    db.commit()
+    db.refresh(current_user)
+    return current_user
 
 
 def _create_session_tokens(user: Profile, db: Session) -> dict[str, str]:

@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from contextlib import asynccontextmanager
+import uuid
 import uvicorn
 from database import get_db, engine
 from models.db_models import Base
@@ -17,6 +18,53 @@ async def lifespan(app: FastAPI):
     with engine.begin() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis;"))
         Base.metadata.create_all(bind=conn)
+        conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS address VARCHAR;"))
+        conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS city VARCHAR;"))
+        conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS contact_phone VARCHAR;"))
+        conn.execute(text(
+            "ALTER TABLE cities ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT FALSE;"
+        ))
+        conn.execute(text(
+            "ALTER TABLE cities ADD COLUMN IF NOT EXISTS center_latitude NUMERIC(9, 6);"
+        ))
+        conn.execute(text(
+            "ALTER TABLE cities ADD COLUMN IF NOT EXISTS center_longitude NUMERIC(9, 6);"
+        ))
+        conn.execute(text(
+            "ALTER TABLE cities ADD COLUMN IF NOT EXISTS "
+            "created_at TIMESTAMPTZ NOT NULL DEFAULT now();"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_properties_city_created_at "
+            "ON properties (city, created_at DESC);"
+        ))
+        city_values = {
+            "id": uuid.uuid4(),
+            "name": "Cooch Behar",
+            "state": "West Bengal",
+            "latitude": 26.323,
+            "longitude": 89.451,
+        }
+        conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext('smalltown:seed-city:cooch-behar'))")
+        )
+        existing_city = conn.execute(
+            text(
+                "UPDATE cities SET state = :state, is_active = TRUE, "
+                "center_latitude = :latitude, center_longitude = :longitude "
+                "WHERE name = :name RETURNING id"
+            ),
+            city_values,
+        ).first()
+        if existing_city is None:
+            conn.execute(
+                text(
+                    "INSERT INTO cities "
+                    "(id, name, state, is_active, center_latitude, center_longitude) "
+                    "VALUES (:id, :name, :state, TRUE, :latitude, :longitude)"
+                ),
+                city_values,
+            )
 
     yield
 
