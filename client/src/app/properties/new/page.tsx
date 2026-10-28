@@ -2,25 +2,38 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { api } from "@/lib/api";
+import { markListingCreated } from "@/lib/listing-created";
 import { processAndCompressImage } from "@/lib/compressor";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Upload, ArrowRight, ArrowLeft, CheckCircle2, AlertCircle, X } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Loader2, Upload, ArrowRight, ArrowLeft, CheckCircle2, AlertCircle, X, MapPin } from "lucide-react";
+
+const PropertyMap = dynamic(() => import("@/components/PropertyMap"), { ssr: false });
 
 // Schema matching FastAPI Pydantic requirements
 const propertySchema = z.object({
   title: z.string().min(5, "Title must be at least 5 characters"),
   area: z.string().min(2, "Area is required"),
+  address: z.string().min(5, "Enter the complete address"),
+  contact_phone: z.string()
+    .trim()
+    .min(7, "Enter a contact phone number")
+    .max(30)
+    .regex(/^[+0-9()\-\s]+$/, "Use only digits, spaces, +, parentheses, or hyphens"),
+  city: z.string().min(2, "Choose a city"),
   description: z.string().min(10, "Description must be at least 10 characters"),
-  type: z.string().min(2, "Type is required (e.g., flat, pg)"),
+  type: z.enum(["room", "pg", "flat"]),
   price: z.coerce.number().min(1, "Price must be greater than 0"),
   latitude: z.coerce.number().min(-90).max(90),
   longitude: z.coerce.number().min(-180).max(180),
@@ -28,6 +41,7 @@ const propertySchema = z.object({
 
 type PropertyFormInput = z.input<typeof propertySchema>;
 type PropertyFormValues = z.output<typeof propertySchema>;
+const COOCH_BEHAR_BOUNDS: [[number, number], [number, number]] = [[25.9, 88.7], [26.75, 89.85]];
 
 function getErrorMessage(error: unknown, fallback: string) {
   if (isAxiosError<{ detail?: unknown }>(error)) {
@@ -66,7 +80,10 @@ function getErrorMessage(error: unknown, fallback: string) {
 
 export default function CreatePropertyPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
+  const [selectedCoordinates, setSelectedCoordinates] = useState<[number, number]>([26.323, 89.451]);
+  const [selectedCityName, setSelectedCityName] = useState("Cooch Behar");
   
   // File & Upload States
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -78,19 +95,39 @@ export default function CreatePropertyPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
+  const citiesQuery = useQuery<{
+    id: string;
+    name: string;
+    state?: string | null;
+    center_latitude?: number | string | null;
+    center_longitude?: number | string | null;
+  }[]>({
+    queryKey: ["cities"],
+    queryFn: async () => (await api.get("/properties/cities")).data,
+  });
   const {
     register,
     handleSubmit,
     formState: { errors },
     trigger,
+    setValue,
   } = useForm<PropertyFormInput, unknown, PropertyFormValues>({
     resolver: zodResolver(propertySchema),
     defaultValues: {
       price: 5000,
-      latitude: 26.7271,
-      longitude: 88.3953,
+      city: "Cooch Behar",
+      type: "room",
+      latitude: 26.323,
+      longitude: 89.451,
     },
   });
+  const selectedCity = citiesQuery.data?.find((city) => city.name === selectedCityName);
+  const mapCenter: [number, number] = [
+    Number(selectedCity?.center_latitude ?? 26.323),
+    Number(selectedCity?.center_longitude ?? 89.451),
+  ];
+  const coochBeharBounds: [[number, number], [number, number]] | undefined =
+    selectedCityName === "Cooch Behar" ? COOCH_BEHAR_BOUNDS : undefined;
 
   // Handle local file selection with 9MB guardrail
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -165,7 +202,12 @@ export default function CreatePropertyPage() {
     };
 
     try {
-      await api.post("/properties/create-property", payload);
+      const { data: createdProperty } = await api.post<{ id: string }>(
+        "/properties/create-property",
+        payload
+      );
+      await queryClient.invalidateQueries({ queryKey: ["properties"] });
+      markListingCreated(createdProperty.id);
       router.push("/explore");
     } catch (err: unknown) {
       setErrorMessage(getErrorMessage(err, "Failed to create property listing."));
@@ -175,21 +217,21 @@ export default function CreatePropertyPage() {
   };
 
   return (
-    <main className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+    <main className="min-h-screen flex-1 bg-[#faf9f6] py-10 px-4 sm:px-6 lg:px-8">
       <div className="max-w-2xl mx-auto">
         {/* Header Stepper */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">List a Sanctuary</h1>
-          <p className="text-gray-600 mt-1">Upload verified photos to help students trust your listing.</p>
+          <h1 className="text-3xl font-semibold text-stone-900 tracking-tight">List your place</h1>
+          <p className="text-stone-600 mt-1">Share the details that help someone feel at home.</p>
 
           <div className="flex justify-center items-center gap-3 mt-6">
-            <span className={`px-3 py-1 rounded-full text-xs font-bold ${step === 1 ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700'}`}>
+            <span className={`px-3 py-1 rounded-full text-xs font-bold ${step === 1 ? 'bg-emerald-700 text-white' : 'bg-stone-200 text-stone-700'}`}>
               1. Property Info
             </span>
-            <span className={`px-3 py-1 rounded-full text-xs font-bold ${step === 2 ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700'}`}>
+            <span className={`px-3 py-1 rounded-full text-xs font-bold ${step === 2 ? 'bg-emerald-700 text-white' : 'bg-stone-200 text-stone-700'}`}>
               2. Photos (Max 3)
             </span>
-            <span className={`px-3 py-1 rounded-full text-xs font-bold ${step === 3 ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700'}`}>
+            <span className={`px-3 py-1 rounded-full text-xs font-bold ${step === 3 ? 'bg-emerald-700 text-white' : 'bg-stone-200 text-stone-700'}`}>
               3. Review & Submit
             </span>
           </div>
@@ -202,7 +244,6 @@ export default function CreatePropertyPage() {
             <span>{errorMessage}</span>
           </div>
         )}
-
         <Card className="shadow-lg border-gray-200">
           {/* STEP 1: Basic Information */}
           {step === 1 && (
@@ -212,7 +253,7 @@ export default function CreatePropertyPage() {
             })}>
               <CardHeader>
                 <CardTitle>Property Details & Location</CardTitle>
-                <CardDescription>Enter pricing, title, and coordinates.</CardDescription>
+                <CardDescription>Share the essentials, then pin the place on the map.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
@@ -221,35 +262,99 @@ export default function CreatePropertyPage() {
                   {errors.title && <p className="text-red-500 text-xs mt-1">{errors.title.message}</p>}
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <Label htmlFor="area">Area / Locality</Label>
                     <Input id="area" placeholder="e.g. City Center" {...register("area")} className="mt-1" />
                     {errors.area && <p className="text-red-500 text-xs mt-1">{errors.area.message}</p>}
                   </div>
                   <div>
-                    <Label htmlFor="type">Property Type</Label>
-                    <Input id="type" placeholder="e.g. flat or pg" {...register("type")} className="mt-1" />
-                    {errors.type && <p className="text-red-500 text-xs mt-1">{errors.type.message}</p>}
+                    <Label htmlFor="city">City</Label>
+                    <Select
+                      value={selectedCityName}
+                      onValueChange={(cityName) => {
+                        if (!cityName) return;
+                        setSelectedCityName(cityName);
+                        setValue("city", cityName, { shouldValidate: true });
+                        const city = citiesQuery.data?.find((option) => option.name === cityName);
+                        const coordinates: [number, number] = [
+                          Number(city?.center_latitude ?? 26.323),
+                          Number(city?.center_longitude ?? 89.451),
+                        ];
+                        setSelectedCoordinates(coordinates);
+                        setValue("latitude", coordinates[0], { shouldValidate: true });
+                        setValue("longitude", coordinates[1], { shouldValidate: true });
+                      }}
+                    >
+                      <SelectTrigger id="city" className="mt-1 h-11 w-full">
+                        <SelectValue placeholder="Choose a city" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(citiesQuery.data ?? [{ id: "cooch-behar", name: "Cooch Behar", state: "West Bengal" }]).map((city) => (
+                          <SelectItem key={city.id} value={city.name}>{city.name}{city.state ? `, ${city.state}` : ""}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {citiesQuery.isError && <p className="mt-1 text-xs text-red-500">Couldn&apos;t load the city list. Please refresh and try again.</p>}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <Label htmlFor="price">Monthly Rent (₹)</Label>
                     <Input id="price" type="number" {...register("price")} className="mt-1" />
                     {errors.price && <p className="text-red-500 text-xs mt-1">{errors.price.message}</p>}
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label htmlFor="latitude">Latitude</Label>
-                      <Input id="latitude" type="number" step="any" {...register("latitude")} className="mt-1" />
-                    </div>
-                    <div>
-                      <Label htmlFor="longitude">Longitude</Label>
-                      <Input id="longitude" type="number" step="any" {...register("longitude")} className="mt-1" />
-                    </div>
+                  <div>
+                    <Label htmlFor="type">Property Type</Label>
+                    <Select
+                      defaultValue="room"
+                      onValueChange={(value) => {
+                        if (value === "room" || value === "pg" || value === "flat") {
+                          setValue("type", value, { shouldValidate: true });
+                        }
+                      }}
+                    >
+                      <SelectTrigger id="type" className="mt-1 h-11 w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="room">Room</SelectItem>
+                        <SelectItem value="pg">PG</SelectItem>
+                        <SelectItem value="flat">Flat</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="address">Full address</Label>
+                  <Input id="address" placeholder="House, street, landmark" {...register("address")} className="mt-1" />
+                  {errors.address && <p className="mt-1 text-xs text-red-500">{errors.address.message}</p>}
+                </div>
+
+                <div>
+                  <Label htmlFor="contact_phone">Contact number for this listing</Label>
+                  <Input id="contact_phone" type="tel" inputMode="tel" autoComplete="tel" placeholder="+91 98765 43210" {...register("contact_phone")} className="mt-1 h-11" />
+                  <p className="mt-1 text-xs text-stone-500">Shown to people who open your listing. This is separate from your profile.</p>
+                  {errors.contact_phone && <p className="mt-1 text-xs text-red-500">{errors.contact_phone.message}</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <div>
+                    <Label>Pin the location</Label>
+                    <p className="mt-1 flex items-center gap-1 text-xs text-gray-500"><MapPin className="h-3.5 w-3.5" />Tap to place or move the pin in the approximate Cooch Behar district area.</p>
+                  </div>
+                  <PropertyMap
+                    properties={[]}
+                    selectable
+                    center={mapCenter}
+                    bounds={coochBeharBounds}
+                    selectedLocation={selectedCoordinates}
+                    onLocationSelect={(location) => {
+                      setSelectedCoordinates(location);
+                      setValue("latitude", location[0], { shouldValidate: true });
+                      setValue("longitude", location[1], { shouldValidate: true });
+                    }}
+                  />
                 </div>
 
                 <div>
@@ -259,7 +364,7 @@ export default function CreatePropertyPage() {
                 </div>
 
                 <div className="flex justify-end pt-4">
-                  <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700">
+                  <Button type="submit" className="bg-emerald-700 text-white hover:bg-emerald-800">
                     Next: Upload Photos <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
                 </div>
@@ -277,14 +382,14 @@ export default function CreatePropertyPage() {
                 </CardDescription>
               </CardHeader>
 
-              <div className="border-2 border-dashed border-gray-300 rounded-2xl p-6 text-center bg-gray-50 hover:bg-gray-100 transition">
-                <Upload className="w-10 h-10 text-indigo-600 mx-auto mb-2" />
+              <div className="border-2 border-dashed border-stone-300 rounded-2xl p-6 text-center bg-stone-50 hover:bg-stone-100 transition">
+                <Upload className="w-10 h-10 text-emerald-700 mx-auto mb-2" />
                 <input
                   type="file"
                   multiple
                   accept="image/png, image/jpeg, image/webp"
                   onChange={handleFileSelect}
-                  className="mx-auto block text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
+                  className="mx-auto block text-sm text-stone-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-emerald-50 file:text-emerald-800 hover:file:bg-emerald-100 cursor-pointer"
                 />
               </div>
 
@@ -313,7 +418,7 @@ export default function CreatePropertyPage() {
                 <Button
                   onClick={handleCompressAndUpload}
                   disabled={selectedFiles.length === 0 || isUploading}
-                  className="bg-indigo-600 hover:bg-indigo-700"
+                  className="bg-emerald-700 text-white hover:bg-emerald-800"
                 >
                   {isUploading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
                   {isUploading ? "Compressing & Uploading..." : "Compress & Continue"}
@@ -341,7 +446,7 @@ export default function CreatePropertyPage() {
                 ))}
               </div>
 
-              <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-xl text-sm space-y-1 text-indigo-900">
+              <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl text-sm space-y-1 text-emerald-900">
                 <p><span className="font-semibold">Images Uploaded:</span> {uploadedImageUrls.length} file(s)</p>
                 <p><span className="font-semibold">Storage Provider:</span> Supabase Cloud Bucket</p>
               </div>
