@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, BadgeCheck, Heart, MapPin, ShieldCheck, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
+import { formatPostedAgo } from "@/lib/relative-time";
 import { Card } from "@/components/ui/card";
 
 type PropertySummary = {
@@ -13,6 +14,8 @@ type PropertySummary = {
   type: string;
   price: number;
   image_urls?: string[];
+  owner_name?: string | null;
+  created_at?: string;
 };
 type PropertyPage = { items: PropertySummary[]; total: number; limit: number; offset: number };
 
@@ -90,7 +93,7 @@ export default function Home() {
                   fetchPriority="high"
                 />
               ) : (
-                <div className="flex h-80 items-center justify-center rounded-[1.5rem] bg-gradient-to-br from-emerald-200 via-lime-100 to-amber-100 sm:h-96">
+                <div className="flex h-80 items-center justify-center rounded-[1.5rem] bg-linear-to-br from-emerald-200 via-lime-100 to-amber-100 sm:h-96">
                   <BuildingIllustration />
                 </div>
               )}
@@ -142,12 +145,16 @@ export default function Home() {
                   {listing.image_urls?.[0] ? (
                     <img src={listing.image_urls[0]} alt={listing.title} loading="lazy" className="h-48 w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
                   ) : (
-                    <div className="flex h-48 items-center justify-center bg-gradient-to-br from-emerald-100 to-lime-50 text-emerald-800"><BuildingIllustration /></div>
+                    <div className="flex h-48 items-center justify-center bg-linear-to-br from-emerald-100 to-lime-50 text-emerald-800"><BuildingIllustration /></div>
                   )}
                   <div className="p-4">
                     <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold uppercase text-emerald-800">{listing.type}</span>
                     <h3 className="mt-3 truncate font-semibold">{listing.title}</h3>
                     <p className="mt-1 flex items-center gap-1 text-sm text-stone-500"><MapPin size={14} />{listing.area || "Cooch Behar"}</p>
+                    <p className="mt-1 truncate text-xs text-stone-500">
+                      {listing.owner_name ? `By ${listing.owner_name}` : "Local owner"}
+                      {listing.created_at ? ` · ${formatPostedAgo(listing.created_at)}` : ""}
+                    </p>
                     <p className="mt-3 font-semibold text-emerald-800">₹{Number(listing.price).toLocaleString("en-IN")}<span className="text-sm font-normal text-stone-500"> / month</span></p>
                   </div>
                 </Link>

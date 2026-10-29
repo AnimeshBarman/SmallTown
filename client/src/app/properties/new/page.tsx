@@ -9,15 +9,15 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { api } from "@/lib/api";
-import { markListingCreated } from "@/lib/listing-created";
 import { processAndCompressImage } from "@/lib/compressor";
+import TurnstileCaptcha from "@/components/TurnstileCaptcha";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Upload, ArrowRight, ArrowLeft, CheckCircle2, AlertCircle, X, MapPin } from "lucide-react";
+import { Loader2, Upload, ArrowRight, ArrowLeft, CheckCircle2, AlertCircle, X, MapPin, Clock3 } from "lucide-react";
 
 const PropertyMap = dynamic(() => import("@/components/PropertyMap"), { ssr: false });
 
@@ -94,7 +94,14 @@ export default function CreatePropertyPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaRefreshKey, setCaptchaRefreshKey] = useState(0);
+  const [successListingId, setSuccessListingId] = useState<string | null>(null);
 
+  const quotaQuery = useQuery<{ limit: number; used: number; remaining: number; resets_at: string | null }>({
+    queryKey: ["properties", "listing-quota"],
+    queryFn: async () => (await api.get("/properties/listing-quota")).data,
+  });
   const citiesQuery = useQuery<{
     id: string;
     name: string;
@@ -111,6 +118,7 @@ export default function CreatePropertyPage() {
     formState: { errors },
     trigger,
     setValue,
+    reset,
   } = useForm<PropertyFormInput, unknown, PropertyFormValues>({
     resolver: zodResolver(propertySchema),
     defaultValues: {
@@ -132,31 +140,52 @@ export default function CreatePropertyPage() {
   // Handle local file selection with 9MB guardrail
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     setErrorMessage("");
-    if (!e.target.files) return;
+    const input = e.currentTarget;
+    const filesArray = Array.from(input.files ?? []);
+    input.value = "";
+    if (filesArray.length === 0) return;
 
-    const filesArray = Array.from(e.target.files).slice(0, 3); // Max 3 images
+    const existingFileKeys = new Set(
+      selectedFiles.map((file) => `${file.name}:${file.size}:${file.lastModified}`)
+    );
+    const newFiles = filesArray.filter((file) => {
+      const key = `${file.name}:${file.size}:${file.lastModified}`;
+      if (existingFileKeys.has(key)) return false;
+      existingFileKeys.add(key);
+      return true;
+    });
+    const remainingSlots = Math.max(0, 3 - selectedFiles.length);
+    const filesToAdd = newFiles.slice(0, remainingSlots);
+    if (newFiles.length > remainingSlots) {
+      setErrorMessage(
+        remainingSlots === 0
+          ? "You can upload up to 3 photos. Remove a selected photo before adding another."
+          : `Only ${remainingSlots} more photo${remainingSlots === 1 ? "" : "s"} fit the 3-photo limit. The extra photos were not added.`
+      );
+    }
+    if (filesToAdd.length === 0) return;
+
     const MAX_INPUT_SIZE = 9 * 1024 * 1024; // 9MB limit
 
     // Guardrail: Check raw file sizes before doing anything
-    for (const file of filesArray) {
+    for (const file of filesToAdd) {
       if (file.size > MAX_INPUT_SIZE) {
         setErrorMessage(`File "${file.name}" exceeds the 9MB limit. Please select a smaller photo.`);
         return;
-      }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
+      }
     }
 
-    setSelectedFiles(filesArray);
-
-    // Clean up previous blob previews
-    previewUrls.forEach((url) => URL.revokeObjectURL(url));
-
-    // Generate local Object URLs for instant preview
-    const newPreviews = filesArray.map((file) => URL.createObjectURL(file));
-    setPreviewUrls(newPreviews);
+    setSelectedFiles((current) => [...current, ...filesToAdd]);
+    setPreviewUrls((current) => [
+      ...current,
+      ...filesToAdd.map((file) => URL.createObjectURL(file)),
+    ]);
   };
 
   // Remove a photo from preview list
   const removeFile = (index: number) => {
+    const removedPreview = previewUrls[index];
+    if (removedPreview) URL.revokeObjectURL(removedPreview);
     const updatedFiles = selectedFiles.filter((_, i) => i !== index);
     const updatedPreviews = previewUrls.filter((_, i) => i !== index);
     setSelectedFiles(updatedFiles);
@@ -166,6 +195,14 @@ export default function CreatePropertyPage() {
   // Compress and batch upload to FastAPI
   const handleCompressAndUpload = async () => {
     if (selectedFiles.length === 0) return;
+    if (!captchaToken) {
+      setErrorMessage("Complete the security check before uploading photos.");
+      return;
+    }
+    if (quotaQuery.data?.remaining === 0) {
+      setErrorMessage("You have reached the limit of 3 listings in 24 hours.");
+      return;
+    }
     setIsUploading(true);
     setErrorMessage("");
 
@@ -179,13 +216,20 @@ export default function CreatePropertyPage() {
       compressedFiles.forEach((file) => formData.append("files", file));
       const response = await api.post<{ urls: string[] }>(
         "/properties/upload-images",
-        formData
+        formData,
+        { headers: { "X-Captcha-Token": captchaToken } }
       );
 
       setUploadedImageUrls(response.data.urls);
+      previewUrls.forEach((url) => URL.revokeObjectURL(url));
+      setPreviewUrls([]);
+      setSelectedFiles([]);
+      setCaptchaToken(null);
       setStep(3); // Advance to final review step
     } catch (err: unknown) {
       setErrorMessage(getErrorMessage(err, "Image compression or upload failed. Please try again."));
+      setCaptchaToken(null);
+      setCaptchaRefreshKey((key) => key + 1);
     } finally {
       setIsUploading(false);
     }
@@ -193,6 +237,14 @@ export default function CreatePropertyPage() {
 
   // Step C: Send clean JSON payload to create-property endpoint
   const onSubmit = async (data: PropertyFormValues) => {
+    if (!captchaToken) {
+      setErrorMessage("Complete the security check before publishing.");
+      return;
+    }
+    if (quotaQuery.data?.remaining === 0) {
+      setErrorMessage("You have reached the limit of 3 listings in 24 hours.");
+      return;
+    }
     setIsSubmitting(true);
     setErrorMessage("");
 
@@ -204,17 +256,158 @@ export default function CreatePropertyPage() {
     try {
       const { data: createdProperty } = await api.post<{ id: string }>(
         "/properties/create-property",
-        payload
+        payload,
+        { headers: { "X-Captcha-Token": captchaToken } }
       );
       await queryClient.invalidateQueries({ queryKey: ["properties"] });
-      markListingCreated(createdProperty.id);
-      router.push("/explore");
+      await queryClient.invalidateQueries({ queryKey: ["properties", "listing-quota"] });
+      setSuccessListingId(createdProperty.id);
     } catch (err: unknown) {
       setErrorMessage(getErrorMessage(err, "Failed to create property listing."));
+      setCaptchaToken(null);
+      setCaptchaRefreshKey((key) => key + 1);
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const handlePostAnother = () => {
+    previewUrls.forEach((url) => URL.revokeObjectURL(url));
+    reset();
+    setStep(1);
+    setSelectedCoordinates([26.323, 89.451]);
+    setSelectedCityName("Cooch Behar");
+    setSelectedFiles([]);
+    setPreviewUrls([]);
+    setUploadedImageUrls([]);
+    setErrorMessage("");
+    setCaptchaToken(null);
+    setCaptchaRefreshKey((key) => key + 1);
+    setSuccessListingId(null);
+    void queryClient.invalidateQueries({ queryKey: ["properties", "listing-quota"] });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  if (successListingId) {
+    return (
+      <main className="flex min-h-[calc(100vh-4rem)] flex-1 items-center justify-center bg-[#f7fbf7] px-4 py-10 sm:px-6">
+        <Card className="w-full max-w-2xl overflow-hidden rounded-[2rem] border-emerald-200 bg-white shadow-xl shadow-emerald-950/5">
+          <div className="bg-linear-to-br from-emerald-700 via-emerald-700 to-green-600 px-6 py-12 text-center text-white sm:px-12 sm:py-16">
+            <div className="mx-auto flex size-20 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/30 sm:size-24">
+              <CheckCircle2 className="size-12 sm:size-14" strokeWidth={1.8} />
+            </div>
+            <h1 className="mt-6 text-3xl font-bold tracking-tight sm:text-4xl">Property listed successfully!</h1>
+            <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-emerald-50 sm:text-base">
+              Your place is live and ready for people to discover. You can view the listing or add another place.
+            </p>
+          </div>
+          <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:justify-center sm:p-8">
+            <Button
+              type="button"
+              onClick={() => router.push(`/explore?property=${encodeURIComponent(successListingId)}`)}
+              className="h-12 rounded-xl bg-emerald-700 px-6 text-base text-white hover:bg-emerald-800"
+            >
+              <MapPin className="mr-2 size-4" />
+              View listing
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handlePostAnother}
+              className="h-12 rounded-xl border-emerald-200 px-6 text-base text-emerald-900 hover:bg-emerald-50"
+            >
+              <Upload className="mr-2 size-4" />
+              Post another
+            </Button>
+          </CardContent>
+        </Card>
+      </main>
+    );
+  }
+
+  if (quotaQuery.isPending) {
+    return (
+      <main className="flex min-h-[60vh] flex-1 items-center justify-center bg-[#faf9f6] px-4">
+        <div role="status" className="flex items-center gap-3 text-stone-600">
+          <Loader2 className="size-5 animate-spin text-emerald-700" />
+          Checking your listing availability…
+        </div>
+      </main>
+    );
+  }
+
+  if (quotaQuery.isError || !quotaQuery.data) {
+    return (
+      <main className="flex min-h-[60vh] flex-1 items-center justify-center bg-[#faf9f6] px-4 py-10">
+        <Card className="w-full max-w-lg rounded-3xl border-amber-200 bg-white p-6 text-center shadow-sm sm:p-8">
+          <AlertCircle className="mx-auto size-10 text-amber-600" />
+          <h1 className="mt-4 text-xl font-semibold text-stone-900">We couldn&apos;t check your listing limit</h1>
+          <p className="mt-2 text-sm leading-6 text-stone-600">
+            Please try again before starting your listing. We check availability first so you don&apos;t spend time filling out a form you can&apos;t submit.
+          </p>
+          <Button
+            type="button"
+            onClick={() => void quotaQuery.refetch()}
+            className="mt-5 rounded-xl bg-emerald-700 text-white hover:bg-emerald-800"
+          >
+            Try again
+          </Button>
+        </Card>
+      </main>
+    );
+  }
+
+  if (quotaQuery.data.remaining === 0) {
+    const resetDate = quotaQuery.data.resets_at ? new Date(quotaQuery.data.resets_at) : null;
+    const resetLabel =
+      resetDate && Number.isFinite(resetDate.getTime())
+        ? new Intl.DateTimeFormat("en-IN", {
+            dateStyle: "medium",
+            timeStyle: "short",
+          }).format(resetDate)
+        : null;
+
+    return (
+      <main className="flex min-h-[60vh] flex-1 items-center justify-center bg-[#f7fbf7] px-4 py-10 sm:px-6">
+        <Card className="w-full max-w-xl rounded-3xl border-emerald-200 bg-white p-6 text-center shadow-lg shadow-emerald-950/5 sm:p-10">
+          <div className="mx-auto flex size-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-800">
+            <Clock3 className="size-8" />
+          </div>
+          <h1 className="mt-5 text-2xl font-bold tracking-tight text-stone-900 sm:text-3xl">
+            Daily listing limit reached
+          </h1>
+          <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-stone-600 sm:text-base">
+            You&apos;ve used all {quotaQuery.data.limit} listing slots in the last 24 hours. You can post again when one of your recent listings reaches its 24-hour mark.
+          </p>
+          {resetLabel && (
+            <p className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900">
+              Your next listing slot should be available after {resetLabel}.
+            </p>
+          )}
+          <p className="mt-3 text-xs text-stone-500">
+            This limit helps keep listings useful and reduce spam.
+          </p>
+          <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
+            <Button
+              type="button"
+              onClick={() => router.push("/account")}
+              className="h-11 rounded-xl bg-emerald-700 px-5 text-white hover:bg-emerald-800"
+            >
+              Go to my account
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => router.push("/explore")}
+              className="h-11 rounded-xl border-emerald-200 px-5 text-emerald-900 hover:bg-emerald-50"
+            >
+              Explore listings
+            </Button>
+          </div>
+        </Card>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen flex-1 bg-[#faf9f6] py-10 px-4 sm:px-6 lg:px-8">
@@ -223,6 +416,11 @@ export default function CreatePropertyPage() {
         <div className="text-center mb-8">
           <h1 className="text-3xl font-semibold text-stone-900 tracking-tight">List your place</h1>
           <p className="text-stone-600 mt-1">Share the details that help someone feel at home.</p>
+          {quotaQuery.data && (
+            <p className="mt-2 text-sm text-stone-500">
+              {quotaQuery.data.remaining} of {quotaQuery.data.limit} listings available in the next 24 hours
+            </p>
+          )}
 
           <div className="flex justify-center items-center gap-3 mt-6">
             <span className={`px-3 py-1 rounded-full text-xs font-bold ${step === 1 ? 'bg-emerald-700 text-white' : 'bg-stone-200 text-stone-700'}`}>
@@ -384,11 +582,13 @@ export default function CreatePropertyPage() {
 
               <div className="border-2 border-dashed border-stone-300 rounded-2xl p-6 text-center bg-stone-50 hover:bg-stone-100 transition">
                 <Upload className="w-10 h-10 text-emerald-700 mx-auto mb-2" />
+                <p className="mb-3 text-sm text-stone-600">{selectedFiles.length} of 3 photos selected. You can add photos in multiple selections.</p>
                 <input
                   type="file"
                   multiple
                   accept="image/png, image/jpeg, image/webp"
                   onChange={handleFileSelect}
+                  disabled={selectedFiles.length >= 3 || isUploading}
                   className="mx-auto block text-sm text-stone-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-emerald-50 file:text-emerald-800 hover:file:bg-emerald-100 cursor-pointer"
                 />
               </div>
@@ -411,13 +611,18 @@ export default function CreatePropertyPage() {
                 </div>
               )}
 
+              <TurnstileCaptcha
+                key={`${step}-${captchaRefreshKey}`}
+                onTokenChange={setCaptchaToken}
+              />
+
               <div className="flex justify-between pt-4">
                 <Button variant="outline" onClick={() => setStep(1)}>
                   <ArrowLeft className="w-4 h-4 mr-2" /> Back
                 </Button>
                 <Button
                   onClick={handleCompressAndUpload}
-                  disabled={selectedFiles.length === 0 || isUploading}
+                  disabled={selectedFiles.length === 0 || isUploading || !captchaToken || quotaQuery.data?.remaining === 0}
                   className="bg-emerald-700 text-white hover:bg-emerald-800"
                 >
                   {isUploading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
@@ -451,13 +656,18 @@ export default function CreatePropertyPage() {
                 <p><span className="font-semibold">Storage Provider:</span> Supabase Cloud Bucket</p>
               </div>
 
+              <TurnstileCaptcha
+                key={`${step}-${captchaRefreshKey}`}
+                onTokenChange={setCaptchaToken}
+              />
+
               <div className="flex justify-between pt-4">
                 <Button variant="outline" onClick={() => setStep(2)}>
                   <ArrowLeft className="w-4 h-4 mr-2" /> Back
                 </Button>
                 <Button
                   onClick={handleSubmit(onSubmit)}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !captchaToken || quotaQuery.data?.remaining === 0}
                   className="bg-green-600 hover:bg-green-700 text-white font-semibold"
                 >
                   {isSubmitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}

@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
-  ArrowLeft, ArrowRight, BedDouble, Heart, Loader2, MapPin, Phone, Search, ShieldCheck, Sparkles, X,
+  ArrowLeft, ArrowRight, BedDouble, ChevronLeft, ChevronRight, Heart, Loader2, MapPin, Phone, Search, ShieldCheck, Sparkles, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { formatPostedAgo } from "@/lib/relative-time";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,7 @@ import {
 } from "@/lib/selected-property";
 
 const PAGE_SIZE = 12;
+type ListingSort = "newest" | "oldest" | "price_asc";
 
 const PropertyMap = dynamic(() => import("@/components/PropertyMap"), {
   ssr: false,
@@ -48,6 +50,8 @@ type PropertySummary = {
   latitude?: number | null;
   longitude?: number | null;
   view_count?: number;
+  owner_name?: string | null;
+  created_at?: string;
 };
 
 type PropertyDetail = PropertySummary & { contact_phone?: string | null };
@@ -74,8 +78,14 @@ export default function ExplorePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [city, setCity] = useState("Cooch Behar");
+  const [sort, setSort] = useState<ListingSort>("newest");
   const [page, setPage] = useState(0);
   const [searchText, setSearchText] = useState("");
+  const [photoSelection, setPhotoSelection] = useState<{ propertyId: string | null; index: number }>({
+    propertyId: null,
+    index: 0,
+  });
+  const photoTouchStartX = useRef<number | null>(null);
   const createdPropertyId = useSyncExternalStore(
     subscribeToCreatedListing,
     getCreatedListingSnapshot,
@@ -94,10 +104,10 @@ export default function ExplorePage() {
   });
 
   const propertiesQuery = useQuery<PropertyPage>({
-    queryKey: ["properties", city, page],
+    queryKey: ["properties", city, sort, page],
     queryFn: async () => {
       const { data } = await api.get<PropertyPage | LegacyPropertyPage>("/properties/", {
-        params: { city, limit: PAGE_SIZE, offset: page * PAGE_SIZE },
+        params: { city, sort, limit: PAGE_SIZE, offset: page * PAGE_SIZE },
         timeout: 10000,
       });
       if (Array.isArray(data)) {
@@ -127,6 +137,14 @@ export default function ExplorePage() {
   const displayedProperties = searchMutation.isSuccess
     ? searchMutation.data
     : properties;
+  const sortedDisplayedProperties = searchMutation.isSuccess
+    ? [...displayedProperties].sort((a, b) => {
+        if (sort === "price_asc") return Number(a.price) - Number(b.price);
+        const dateDifference =
+          new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime();
+        return sort === "oldest" ? dateDifference : -dateDifference;
+      })
+    : displayedProperties;
 
   const detailQuery = useQuery<PropertyDetail>({
     queryKey: ["property", selectedId],
@@ -190,6 +208,11 @@ export default function ExplorePage() {
       property.longitude <= 180
   );
   const detail = detailQuery.data;
+  const detailImages = detail?.image_urls ?? [];
+  const activePhotoIndex = photoSelection.propertyId === selectedId ? photoSelection.index : 0;
+  const activeImageIndex = detailImages.length
+    ? Math.min(activePhotoIndex, detailImages.length - 1)
+    : 0;
   const detailHasCoordinates =
     typeof detail?.latitude === "number" &&
     typeof detail.longitude === "number" &&
@@ -225,7 +248,7 @@ export default function ExplorePage() {
           </div>
         </div>
 
-        <Card className="mb-4 rounded-2xl border-emerald-100 bg-gradient-to-r from-emerald-50 via-white to-lime-50 p-2.5 shadow-sm sm:p-3">
+        <Card className="mb-4 rounded-2xl border-emerald-100 bg-linear-to-r from-emerald-50 via-white to-lime-50 p-2.5 shadow-sm sm:p-3">
           <form
             className="flex gap-2"
             onSubmit={(event) => {
@@ -308,6 +331,29 @@ export default function ExplorePage() {
           </Card>
         )}
 
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <p className="text-sm text-stone-600">
+            {searchMutation.isSuccess
+              ? `${sortedDisplayedProperties.length} search results`
+              : `${propertiesQuery.data?.total ?? 0} places`}
+          </p>
+          <Select value={sort} onValueChange={(value) => {
+            if (value === "newest" || value === "oldest" || value === "price_asc") {
+              setSort(value);
+              setPage(0);
+            }
+          }}>
+            <SelectTrigger aria-label="Sort listings" className="h-9 w-44 rounded-xl border-stone-200 bg-white">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="newest">Newest first</SelectItem>
+              <SelectItem value="oldest">Oldest first</SelectItem>
+              <SelectItem value="price_asc">Price: low to high</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         {propertiesQuery.isLoading ? (
           <div className="flex h-24 items-center justify-center gap-2 rounded-2xl border border-stone-200 bg-white text-sm text-stone-600" role="status">
             <Loader2 size={18} className="animate-spin text-emerald-700" />
@@ -321,13 +367,13 @@ export default function ExplorePage() {
         ) : (
           <div className="grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
             <section aria-label="Available places" className="min-w-0 space-y-4">
-              {displayedProperties.map((property) => (
+              {sortedDisplayedProperties.map((property) => (
                 <Card key={property.id} className="group min-w-0 overflow-hidden rounded-3xl border border-stone-200 bg-white p-0 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-lg">
                   <button type="button" onClick={() => setSelectedProperty(property.id)} className="flex min-h-32 w-full min-w-0 gap-3 p-3 text-left sm:min-h-40 sm:gap-5 sm:p-4">
                   {property.image_urls?.[0] ? (
                     <img src={property.image_urls[0]} alt="" loading="lazy" className="h-28 w-28 shrink-0 rounded-2xl object-cover sm:h-36 sm:w-40" />
                   ) : (
-                    <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-100 via-lime-50 to-amber-100 text-emerald-800 sm:h-36 sm:w-40">
+                    <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-2xl bg-linear-to-br from-emerald-100 via-lime-50 to-amber-100 text-emerald-800 sm:h-36 sm:w-40">
                       <BedDouble size={30} />
                     </div>
                   )}
@@ -338,6 +384,10 @@ export default function ExplorePage() {
                     </span>
                     <span className="mt-2 truncate text-base font-semibold sm:text-lg">{property.title}</span>
                     <span className="mt-1 flex items-center gap-1 truncate text-sm text-stone-500"><MapPin size={14} className="shrink-0" />{property.area || property.city || "Cooch Behar"}</span>
+                    <span className="mt-1 truncate text-xs text-stone-500">
+                      {property.owner_name ? `By ${property.owner_name}` : "Local owner"}
+                      {property.created_at ? ` · ${formatPostedAgo(property.created_at)}` : ""}
+                    </span>
                     <span className="mt-2 inline-flex items-baseline gap-1 self-start rounded-lg bg-emerald-50 px-2 py-1 text-lg font-bold text-emerald-800">₹{Number(property.price).toLocaleString("en-IN")}<span className="text-xs font-normal text-emerald-700">/ month</span></span>
                   </span>
                   </button>
@@ -387,7 +437,7 @@ export default function ExplorePage() {
             role="dialog"
             aria-modal="true"
             aria-label="Place details"
-            className="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-[2rem] bg-white p-0 shadow-2xl sm:rounded-[2rem]"
+            className="relative max-h-[88dvh] w-full max-w-2xl overflow-hidden rounded-t-[2rem] bg-white p-0 shadow-2xl sm:rounded-[2rem]"
           >
             <button
               type="button"
@@ -406,12 +456,72 @@ export default function ExplorePage() {
               </div>
             ) : detail ? (
               <>
-                {detail.image_urls?.[0] ? (
-                  <img src={detail.image_urls[0]} alt={detail.title} loading="lazy" className="h-64 w-full object-cover sm:h-80" />
-                ) : (
-                  <div className="flex h-64 items-center justify-center bg-gradient-to-br from-emerald-100 to-lime-50 text-emerald-800 sm:h-80"><BedDouble size={42} /></div>
-                )}
-                <div className="p-5 sm:p-8">
+                <div
+                  className="relative h-48 shrink-0 touch-pan-y bg-linear-to-br from-emerald-100 to-lime-50 sm:h-60"
+                  onTouchStart={(event) => {
+                    photoTouchStartX.current = event.touches[0]?.clientX ?? null;
+                  }}
+                  onTouchEnd={(event) => {
+                    const startX = photoTouchStartX.current;
+                    const endX = event.changedTouches[0]?.clientX;
+                    photoTouchStartX.current = null;
+                    if (startX === null || endX === undefined || detailImages.length < 2) return;
+                    const distance = endX - startX;
+                    if (Math.abs(distance) < 40) return;
+                    setPhotoSelection({
+                      propertyId: selectedId,
+                      index: (activePhotoIndex + (distance < 0 ? 1 : -1) + detailImages.length) % detailImages.length,
+                    });
+                  }}
+                >
+                  {detailImages[activeImageIndex] ? (
+                    <img src={detailImages[activeImageIndex]} alt={`${detail.title}, photo ${activeImageIndex + 1}`} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-emerald-800"><BedDouble size={42} /></div>
+                  )}
+                  {detailImages.length > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        aria-label="Previous photo"
+                        onClick={() => setPhotoSelection({
+                          propertyId: selectedId,
+                          index: (activePhotoIndex - 1 + detailImages.length) % detailImages.length,
+                        })}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 text-stone-800 shadow hover:bg-white"
+                      >
+                        <ChevronLeft size={20} />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Next photo"
+                        onClick={() => setPhotoSelection({
+                          propertyId: selectedId,
+                          index: (activePhotoIndex + 1) % detailImages.length,
+                        })}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 text-stone-800 shadow hover:bg-white"
+                      >
+                        <ChevronRight size={20} />
+                      </button>
+                      <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 gap-1.5 rounded-full bg-stone-950/45 px-2.5 py-1.5">
+                        {detailImages.map((_, index) => (
+                          <button
+                            key={index}
+                            type="button"
+                            aria-label={`Show photo ${index + 1}`}
+                            aria-current={index === activeImageIndex}
+                            onClick={() => setPhotoSelection({ propertyId: selectedId, index })}
+                            className={`h-1.5 w-1.5 rounded-full ${index === activeImageIndex ? "bg-white" : "bg-white/50"}`}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  <span className="absolute bottom-3 right-3 rounded-full bg-stone-950/55 px-2.5 py-1 text-xs text-white">
+                    {detailImages.length ? `${activeImageIndex + 1} / ${detailImages.length}` : "No photos"}
+                  </span>
+                </div>
+                <div className="max-h-[calc(88dvh-12rem)] overflow-y-auto p-4 sm:p-6">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-800">{detail.type}</span>
@@ -436,11 +546,15 @@ export default function ExplorePage() {
                     </button>
                   </div>
                   <p className="mt-3 text-2xl font-bold text-emerald-800">₹{Number(detail.price).toLocaleString("en-IN")}<span className="text-sm font-normal text-stone-500"> / month</span></p>
+                  <p className="mt-1 text-sm text-stone-500">
+                    Listed by <span className="font-medium text-stone-700">{detail.owner_name || "Local owner"}</span>
+                    {detail.created_at ? ` · Posted ${formatPostedAgo(detail.created_at)}` : ""}
+                  </p>
                   {detailHasCoordinates && (
                     <div className="mt-5">
                       <p className="mb-2 text-sm font-semibold text-stone-800">Location on map</p>
                       <PropertyMap
-                        className="h-52 sm:h-64"
+                        className="h-32 sm:h-36"
                         properties={[{
                           id: detail.id,
                           title: detail.title,

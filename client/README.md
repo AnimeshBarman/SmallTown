@@ -18,6 +18,12 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## Listing security setup
+
+Configure `NEXT_PUBLIC_TURNSTILE_SITE_KEY` in the client environment and `TURNSTILE_SECRET_KEY` in the server environment. Keep the server secret private and restart both servers after changing environment variables.
+
+The backend verifies a fresh Turnstile token on image uploads and listing publication, and limits each signed-in owner to 3 listings in a rolling 24-hour window. Publishing remains unavailable if server-side CAPTCHA verification is not configured.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More

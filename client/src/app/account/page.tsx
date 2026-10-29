@@ -5,8 +5,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import { useRouter } from "next/navigation";
 import { useState, useSyncExternalStore } from "react";
-import { Eye, Heart, Home, Loader2, LogOut, MapPin, Trash2, UserRound } from "lucide-react";
+import { Eye, Heart, Home, Loader2, LogOut, MapPin, Pencil, Trash2, UserRound } from "lucide-react";
 import { api } from "@/lib/api";
+import { formatPostedAgo } from "@/lib/relative-time";
 import { getAuthSnapshot, getServerAuthSnapshot, notifyAuthChanged, subscribeToAuth } from "@/lib/auth-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +29,7 @@ type Listing = {
   price: number;
   image_urls?: string[];
   view_count: number;
+  created_at: string;
 };
 
 function messageFromError(error: unknown) {
@@ -207,9 +209,19 @@ export default function AccountPage() {
                       <h3 className="truncate font-semibold">{listing.title}</h3>
                       <p className="mt-1 flex items-center gap-1 truncate text-sm text-stone-500"><MapPin size={13} />{listing.area || listing.city || "Cooch Behar"}</p>
                       <p className="mt-1 flex items-center gap-1 text-xs font-medium text-stone-500"><Eye size={14} />{listing.view_count} views</p>
+                      <p className="mt-1 text-xs text-stone-500">Posted {formatPostedAgo(listing.created_at)}</p>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2">
                       <span className="font-semibold text-emerald-800">₹{Number(listing.price).toLocaleString("en-IN")}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => router.push(`/properties/${listing.id}/edit`)}
+                        className="h-8 rounded-full px-3 text-xs"
+                      >
+                        <Pencil size={14} /> Edit
+                      </Button>
                       <Button
                         type="button"
                         variant="ghost"

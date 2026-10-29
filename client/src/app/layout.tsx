@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import Providers from "@/components/Providers";
 import SiteHeader from "@/components/SiteHeader";
@@ -28,7 +29,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         <Providers>
-          <SiteHeader />
+          <Suspense fallback={<header className="h-[57px] shrink-0 border-b border-stone-200/80 bg-white" />}>
+            <SiteHeader />
+          </Suspense>
           {children}
         </Providers>
       </body>
