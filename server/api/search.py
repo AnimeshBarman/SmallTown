@@ -103,7 +103,8 @@ async def ai_powered_search(
 
         results = _property_rows(
             db,
-            query.order_by(Property.created_at.desc()).limit(limit),
+            query.order_by(Property.created_at.desc()),
+            limit=limit,
         )
 
         serialized_data = [

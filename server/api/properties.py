@@ -1,11 +1,11 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, status, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, status, Query, Request, Header
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, cast, func, or_
+from sqlalchemy import and_, cast, func, or_, text
 from sqlalchemy.dialects.postgresql import insert
-from typing import List
+from typing import List, Literal
 from geoalchemy2 import Geography, Geometry
 from geoalchemy2.elements import WKTElement
 
@@ -20,31 +20,85 @@ from schemas.property_schema import (
     PropertyDetailResponse,
     PropertyPageResponse,
     PropertyResponse,
+    PropertyUpdate,
 )
 from services.storage_service import (process_and_upload_image, delete_images_from_storage)
+from services.captcha_service import verify_listing_captcha
 
 from dependencies import get_current_user
 from security import SECRET_KEY
 
 
-
 router = APIRouter()
+LISTINGS_PER_DAY_LIMIT = 3
+LISTING_RATE_WINDOW = timedelta(hours=24)
 
-def _property_rows(db: Session, query):
-    property_rows = (
-        query.with_entities(
-            Property,
-            func.ST_Y(cast(Property.coordinates, Geometry)).label("latitude"),
-            func.ST_X(cast(Property.coordinates, Geometry)).label("longitude"),
-        ).all()
+
+def _listing_quota(db: Session, owner_id) -> dict:
+    now = datetime.now(timezone.utc)
+    window_start = now - LISTING_RATE_WINDOW
+    recent_listings = db.query(Property).filter(
+        Property.owner_id == owner_id,
+        Property.created_at >= window_start,
     )
+    count = recent_listings.count()
+    oldest_listing = (
+        recent_listings.order_by(Property.created_at.asc()).first()
+        if count >= LISTINGS_PER_DAY_LIMIT
+        else None
+    )
+    resets_at = None
+    if oldest_listing and oldest_listing.created_at:
+        created_at = oldest_listing.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        resets_at = (created_at + LISTING_RATE_WINDOW).isoformat()
+
+    return {
+        "limit": LISTINGS_PER_DAY_LIMIT,
+        "used": count,
+        "remaining": max(0, LISTINGS_PER_DAY_LIMIT - count),
+        "resets_at": resets_at,
+    }
+
+
+def _enforce_listing_quota(db: Session, owner_id) -> None:
+    quota = _listing_quota(db, owner_id)
+    if quota["remaining"] == 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "You can publish up to 3 listings in a rolling 24-hour period. "
+                f"Try again after {quota['resets_at']}."
+            ),
+            headers={"Retry-After": "86400"},
+        )
+
+
+async def require_listing_captcha(
+    request: Request,
+    x_captcha_token: str = Header(..., alias="X-Captcha-Token", min_length=1),
+) -> None:
+    await verify_listing_captcha(request, x_captcha_token)
+
+def _property_rows(db: Session, query, *, limit: int | None = None, offset: int = 0):
+    query = query.outerjoin(Profile, Profile.id == Property.owner_id).with_entities(
+        Property,
+        func.ST_Y(cast(Property.coordinates, Geometry)).label("latitude"),
+        func.ST_X(cast(Property.coordinates, Geometry)).label("longitude"),
+        Profile.fullname.label("owner_name"),
+    )
+    if limit is not None:
+        query = query.limit(limit).offset(offset)
+    property_rows = query.all()
     return [
         {
             **PropertyResponse.model_validate(property_record).model_dump(),
             "latitude": latitude,
             "longitude": longitude,
+            "owner_name": owner_name,
         }
-        for property_record, latitude, longitude in property_rows
+        for property_record, latitude, longitude, owner_name in property_rows
     ]
 
 
@@ -56,6 +110,7 @@ def get_cities(db: Session = Depends(get_db)):
 @router.get("/", response_model=PropertyPageResponse)
 def get_all_properties(
     city: str = Query("Cooch Behar", min_length=2, max_length=100),
+    sort: Literal["newest", "oldest", "price_asc"] = Query("newest"),
     limit: int = Query(12, ge=1, le=24),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -86,9 +141,14 @@ def get_all_properties(
         .filter(Property.status == "active", city_match)
     )
     total = base_query.count()
-    query = base_query.order_by(Property.created_at.desc()).limit(limit).offset(offset)
+    if sort == "oldest":
+        query = base_query.order_by(Property.created_at.asc())
+    elif sort == "price_asc":
+        query = base_query.order_by(Property.price.asc(), Property.created_at.desc())
+    else:
+        query = base_query.order_by(Property.created_at.desc())
     return {
-        "items": _property_rows(db, query),
+        "items": _property_rows(db, query, limit=limit, offset=offset),
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -122,6 +182,14 @@ def get_saved_properties(
     return _property_rows(db, query)
 
 
+@router.get("/listing-quota")
+def get_listing_quota(
+    db: Session = Depends(get_db),
+    current_user: Profile = Depends(get_current_user),
+):
+    return _listing_quota(db, current_user.id)
+
+
 @router.get("/{property_id}/saved")
 def is_property_saved(
     property_id: UUID,
@@ -143,27 +211,33 @@ def get_property_detail(property_id: UUID, db: Session = Depends(get_db)):
             func.ST_Y(cast(Property.coordinates, Geometry)).label("latitude"),
             func.ST_X(cast(Property.coordinates, Geometry)).label("longitude"),
             Property.contact_phone,
+            Profile.fullname.label("owner_name"),
         )
+        .outerjoin(Profile, Profile.id == Property.owner_id)
         .filter(Property.id == property_id, Property.status == "active")
         .first()
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    property_record, latitude, longitude, contact_phone = row
+    property_record, latitude, longitude, contact_phone, owner_name = row
     return {
         **PropertyResponse.model_validate(property_record).model_dump(),
         "latitude": latitude,
         "longitude": longitude,
         "contact_phone": contact_phone,
+        "owner_name": owner_name,
     }
 
 
 @router.post("/upload-images")
 async def upload_property_images(
     files: list[UploadFile] = File(..., description="Upload up to 3 images"),
-    current_user: Profile = Depends(get_current_user)
+    db: Session = Depends(get_db),
+    current_user: Profile = Depends(get_current_user),
+    _: None = Depends(require_listing_captcha),
     ):
+    _enforce_listing_quota(db, current_user.id)
     if len(files) > 3:
         raise HTTPException(status_code=400, detail="Maximum of 3 images allowed per property.")
     if not files:
@@ -192,8 +266,14 @@ async def upload_property_images(
 def create_property(
     property_data: PropertyCreate, 
     db: Session = Depends(get_db),
-    current_user: Profile = Depends(get_current_user)
+    current_user: Profile = Depends(get_current_user),
+    _: None = Depends(require_listing_captcha),
     ):
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": f"smalltown:listing-limit:{current_user.id}"},
+    )
+    _enforce_listing_quota(db, current_user.id)
     city = db.query(City).filter(
         func.lower(City.name) == property_data.city.lower(),
         City.is_active.is_(True),
@@ -225,6 +305,59 @@ def create_property(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Error creating property: {str(e)}")
+
+
+@router.patch("/{property_id}", response_model=PropertyResponse)
+def update_property(
+    property_id: UUID,
+    property_data: PropertyUpdate,
+    db: Session = Depends(get_db),
+    current_user: Profile = Depends(get_current_user),
+):
+    property_record = db.query(Property).filter(Property.id == property_id).first()
+    if property_record is None:
+        raise HTTPException(status_code=404, detail="Property not found.")
+    if property_record.owner_id != current_user.id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized to edit this property.")
+
+    changes = property_data.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=422, detail="Provide at least one field to update.")
+    for required_field in ("title", "address", "city", "type", "price"):
+        if required_field in changes and changes[required_field] is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{required_field.replace('_', ' ').capitalize()} cannot be empty.",
+            )
+
+    if ("latitude" in changes) != ("longitude" in changes):
+        raise HTTPException(
+            status_code=422,
+            detail="Latitude and longitude must be updated together.",
+        )
+
+    if "city" in changes:
+        city = db.query(City).filter(
+            func.lower(City.name) == changes["city"].lower(),
+            City.is_active.is_(True),
+        ).first()
+        if city is None:
+            raise HTTPException(status_code=422, detail="Choose a city from the available list.")
+        changes["city"] = city.name
+
+    latitude = changes.pop("latitude", None)
+    longitude = changes.pop("longitude", None)
+    for field, value in changes.items():
+        setattr(property_record, field, value)
+    if latitude is not None and longitude is not None:
+        property_record.coordinates = WKTElement(
+            f"POINT({longitude} {latitude})",
+            srid=4326,
+        )
+
+    db.commit()
+    db.refresh(property_record)
+    return property_record
 
 
 
