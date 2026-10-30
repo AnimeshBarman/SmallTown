@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, status, Query, Request, Header
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, status, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, cast, func, or_, text
 from sqlalchemy.dialects.postgresql import insert
@@ -23,7 +23,7 @@ from schemas.property_schema import (
     PropertyUpdate,
 )
 from services.storage_service import (process_and_upload_image, delete_images_from_storage)
-from services.captcha_service import verify_listing_captcha
+from rate_limiter import rate_limit_image_upload
 
 from dependencies import get_current_user
 from security import SECRET_KEY
@@ -74,12 +74,6 @@ def _enforce_listing_quota(db: Session, owner_id) -> None:
             headers={"Retry-After": "86400"},
         )
 
-
-async def require_listing_captcha(
-    request: Request,
-    x_captcha_token: str = Header(..., alias="X-Captcha-Token", min_length=1),
-) -> None:
-    await verify_listing_captcha(request, x_captcha_token)
 
 def _property_rows(db: Session, query, *, limit: int | None = None, offset: int = 0):
     query = query.outerjoin(Profile, Profile.id == Property.owner_id).with_entities(
@@ -232,16 +226,17 @@ def get_property_detail(property_id: UUID, db: Session = Depends(get_db)):
 
 @router.post("/upload-images")
 async def upload_property_images(
+    request: Request,
     files: list[UploadFile] = File(..., description="Upload up to 3 images"),
     db: Session = Depends(get_db),
     current_user: Profile = Depends(get_current_user),
-    _: None = Depends(require_listing_captcha),
     ):
-    _enforce_listing_quota(db, current_user.id)
     if len(files) > 3:
         raise HTTPException(status_code=400, detail="Maximum of 3 images allowed per property.")
     if not files:
         raise HTTPException(status_code=400, detail="No images provided.")
+    _enforce_listing_quota(db, current_user.id)
+    await rate_limit_image_upload(request, str(current_user.id))
 
     uploaded_urls = []
 
@@ -267,7 +262,6 @@ def create_property(
     property_data: PropertyCreate, 
     db: Session = Depends(get_db),
     current_user: Profile = Depends(get_current_user),
-    _: None = Depends(require_listing_captcha),
     ):
     db.execute(
         text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),

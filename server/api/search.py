@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, cast, func, or_
 from typing import List
@@ -15,9 +15,9 @@ from database import get_db
 from models.db_models import City, Property, Landmark
 from schemas.property_schema import PropertyResponse
 from schemas.search_schema import SearchRequest
-from services.ai_service import extract_search_intent 
+from services.ai_service import extract_search_intent, requires_ai_search_intent
 from redis_client import redis_client
-from rate_limiter import rate_limit_by_ip
+from rate_limiter import rate_limit_ai_search_miss, rate_limit_search_requests
 from api.properties import _property_rows
 
 
@@ -26,9 +26,10 @@ logger = logging.getLogger(__name__)
 
 CACHE_TTL_SECONDS = 600
 
-@router.post("/nlp", response_model=List[PropertyResponse], dependencies=[Depends(rate_limit_by_ip)])
+@router.post("/nlp", response_model=List[PropertyResponse], dependencies=[Depends(rate_limit_search_requests)])
 async def ai_powered_search(
     request: SearchRequest,
+    http_request: Request,
     city: str = Query("Cooch Behar", min_length=2, max_length=100),
     limit: int = Query(24, ge=1, le=24),
     db: Session = Depends(get_db),
@@ -43,14 +44,19 @@ async def ai_powered_search(
         if cached_result:
             return json.loads(cached_result)
 
-        search_params = await run_in_threadpool(extract_search_intent, request.query)
-
         active_city = db.query(City.id).filter(
             func.lower(City.name) == normalized_city,
             City.is_active.is_(True),
         ).first()
         if active_city is None:
             raise HTTPException(status_code=404, detail="City is not currently available.")
+
+        if requires_ai_search_intent(request.query):
+            await rate_limit_ai_search_miss(http_request)
+        search_params = await run_in_threadpool(extract_search_intent, request.query)
+        if not any(search_params.values()):
+            await redis_client.setex(cache_key, CACHE_TTL_SECONDS, "[]")
+            return []
 
         city_filter = func.lower(Property.city) == normalized_city
         if normalized_city == "cooch behar":

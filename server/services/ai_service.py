@@ -54,6 +54,21 @@ def _fallback_search_intent(user_query: str) -> dict:
     return intent
 
 
+def _has_search_context(user_query: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(room|pg|paying guest|hostel|flat|apartment|bhk|rent|rental|"
+            r"property|place|stay|accommodation|house|near|around|close to|"
+            r"under|below|less than|up to|upto|budget)\b",
+            user_query.lower(),
+        )
+    )
+
+
+def requires_ai_search_intent(user_query: str) -> bool:
+    return not any(_fallback_search_intent(user_query).values()) and _has_search_context(user_query)
+
+
 def _normalize_search_intent(parsed: object, user_query: str) -> dict:
     if not isinstance(parsed, dict):
         raise ValueError("Search intent must be a JSON object.")
@@ -87,7 +102,11 @@ def _normalize_search_intent(parsed: object, user_query: str) -> dict:
 
 
 def extract_search_intent(user_query: str) -> dict:
-    # Use deterministic extraction for explicit constraints and Groq for flexible phrasing.
+    fallback = _fallback_search_intent(user_query)
+    if not requires_ai_search_intent(user_query):
+        return fallback
+
+    # Use Groq only for property-related phrasing the deterministic parser cannot interpret.
     try:
         system_prompt = (
             "You are a real estate assistant. Extract search parameters from the user query. "
@@ -121,7 +140,6 @@ def extract_search_intent(user_query: str) -> dict:
             raise ValueError("No JSON object found in search intent response.")
         return _normalize_search_intent(json.loads(json_match.group(0)), user_query)
     except Exception:
-        fallback = _fallback_search_intent(user_query)
         if any(fallback.values()):
             logger.warning("Using rule-based search intent after Groq extraction failed.", exc_info=True)
             return fallback

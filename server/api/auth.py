@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from jose import JWTError, jwt
+from starlette.concurrency import run_in_threadpool
 from google.auth.exceptions import GoogleAuthError, TransportError
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2 import id_token as google_id_token
@@ -28,8 +29,14 @@ from security import (
     create_refresh_token, SECRET_KEY, ALGORITHM
 )
 from config import settings
+from rate_limiter import (
+    check_login_rate_limit,
+    clear_login_identity_failures,
+    record_login_failure,
+)
 
 router = APIRouter()
+DUMMY_PASSWORD_HASH = get_password_hash("smalltown-login-timing-equalization")
 
 
 @router.get("/me", response_model=ProfileResponse)
@@ -62,14 +69,26 @@ def _create_session_tokens(user: Profile, db: Session) -> dict[str, str]:
     }
 
 
+def _verify_login_credentials(
+    username: str,
+    password: str,
+    db: Session,
+) -> tuple[Profile | None, bool]:
+    user = db.query(Profile).filter(func.lower(Profile.email) == username).first()
+    password_hash = user.hashed_password if user and user.hashed_password else DUMMY_PASSWORD_HASH
+    password_is_valid = verify_password(password, password_hash)
+    return user, bool(user and user.hashed_password and password_is_valid)
+
+
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 def signup(user_data: UserSignup, db: Session = Depends(get_db)):
-    if db.query(Profile).filter(Profile.email == user_data.email).first():
+    normalized_email = str(user_data.email).strip().lower()
+    if db.query(Profile).filter(func.lower(Profile.email) == normalized_email).first():
         raise HTTPException(status_code=400, detail="Email already registered..!")
         
     new_profile = Profile(
         id=uuid.uuid4(),
-        email=user_data.email,
+        email=normalized_email,
         fullname=user_data.fullname,
         hashed_password=get_password_hash(user_data.password),
         role="seeker"
@@ -79,12 +98,25 @@ def signup(user_data: UserSignup, db: Session = Depends(get_db)):
     return {"message": "Account created successfully. Please login.."}
 
 @router.post("/login", response_model=TokenResponse)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(Profile).filter(Profile.email == form_data.username).first()
-    
-    if not user or not user.hashed_password or not verify_password(form_data.password, user.hashed_password):
+async def login(
+    request: Request,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
+    normalized_email = form_data.username.strip().lower()
+    await check_login_rate_limit(request, normalized_email)
+    user, credentials_valid = await run_in_threadpool(
+        _verify_login_credentials,
+        normalized_email,
+        form_data.password,
+        db,
+    )
+
+    if not credentials_valid or user is None:
+        await record_login_failure(request, normalized_email)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials..!")
-    return _create_session_tokens(user, db)
+    await clear_login_identity_failures(request, normalized_email)
+    return await run_in_threadpool(_create_session_tokens, user, db)
 
 
 @router.post("/google", response_model=TokenResponse)
