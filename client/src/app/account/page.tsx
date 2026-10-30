@@ -204,7 +204,7 @@ export default function AccountPage() {
               <div className="space-y-3">
                 {listingsQuery.data.map((listing) => (
                   <article key={listing.id} className="flex items-center gap-3 rounded-2xl border border-stone-200 p-3 sm:gap-4">
-                    {listing.image_urls?.[0] ? <img src={listing.image_urls[0]} alt="" loading="lazy" className="h-20 w-20 shrink-0 rounded-xl object-cover" /> : <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-800"><Home size={22} /></div>}
+                    {listing.image_urls?.[0] ? <img src={listing.image_urls[0]} alt="" loading="lazy" className="h-20 w-20 shrink-0 rounded-xl bg-stone-100 object-contain" /> : <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-800"><Home size={22} /></div>}
                     <div className="min-w-0 flex-1">
                       <h3 className="truncate font-semibold">{listing.title}</h3>
                       <p className="mt-1 flex items-center gap-1 truncate text-sm text-stone-500"><MapPin size={13} />{listing.area || listing.city || "Cooch Behar"}</p>
@@ -269,7 +269,7 @@ export default function AccountPage() {
               {savedQuery.data.map((listing) => (
                 <Card key={listing.id} className="group overflow-hidden rounded-2xl border border-stone-200 p-0 transition hover:shadow-lg">
                   <Link href={`/explore?property=${listing.id}`}>
-                  {listing.image_urls?.[0] ? <img src={listing.image_urls[0]} alt={listing.title} loading="lazy" className="h-40 w-full object-cover" /> : <div className="flex h-40 items-center justify-center bg-emerald-50 text-emerald-800"><Heart size={24} /></div>}
+                  {listing.image_urls?.[0] ? <img src={listing.image_urls[0]} alt={listing.title} loading="lazy" className="h-40 w-full bg-stone-100 object-contain" /> : <div className="flex h-40 items-center justify-center bg-emerald-50 text-emerald-800"><Heart size={24} /></div>}
                   <div className="p-4">
                     <h3 className="truncate font-semibold group-hover:text-emerald-800">{listing.title}</h3>
                     <p className="mt-1 text-sm text-stone-500">{listing.area || listing.city || "Cooch Behar"}</p>

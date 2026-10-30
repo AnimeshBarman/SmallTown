@@ -136,7 +136,7 @@ export default function PropertyMap({
         image.src = property.image_urls[0];
         image.alt = property.title;
         image.loading = "lazy";
-        image.className = "mb-2 h-28 w-full rounded-md object-cover";
+        image.className = "mb-2 h-28 w-full rounded-md bg-stone-100 object-contain";
         popup.append(image);
       }
 

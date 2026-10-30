@@ -128,3 +128,54 @@
     @apply font-sans;
   }
 }
+
+.dark body {
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+.dark [class~="bg-white"],
+.dark [class~="bg-white/90"] {
+  background-color: var(--card);
+}
+
+.dark [class~="bg-[#faf9f6]"],
+.dark [class~="bg-stone-50"],
+.dark [class~="bg-stone-100"],
+.dark [class~="bg-gray-50"],
+.dark [class~="bg-gray-100"] {
+  background-color: var(--background);
+}
+
+.dark [class~="bg-emerald-50"],
+.dark [class~="bg-green-50"] {
+  background-color: oklch(0.27 0.055 160);
+}
+
+.dark [class~="text-stone-900"],
+.dark [class~="text-stone-800"],
+.dark [class~="text-gray-900"],
+.dark [class~="text-gray-800"] {
+  color: var(--foreground);
+}
+
+.dark [class~="text-stone-700"],
+.dark [class~="text-stone-600"],
+.dark [class~="text-stone-500"],
+.dark [class~="text-gray-700"],
+.dark [class~="text-gray-600"],
+.dark [class~="text-gray-500"] {
+  color: var(--muted-foreground);
+}
+
+.dark [class~="text-emerald-900"],
+.dark [class~="text-emerald-800"],
+.dark [class~="text-emerald-700"] {
+  color: oklch(0.82 0.12 160);
+}
+
+.dark [class~="border-stone-200"],
+.dark [class~="border-stone-300"],
+.dark [class~="border-gray-200"] {
+  border-color: var(--border);
+}

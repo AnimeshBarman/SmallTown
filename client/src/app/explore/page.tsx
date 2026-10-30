@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
   ArrowLeft, ArrowRight, BedDouble, ChevronLeft, ChevronRight, Heart, Loader2, MapPin, Phone, Search, ShieldCheck, Sparkles, X,
+  ZoomIn, ZoomOut,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatPostedAgo } from "@/lib/relative-time";
@@ -85,6 +86,18 @@ export default function ExplorePage() {
     propertyId: null,
     index: 0,
   });
+  const [photoZoom, setPhotoZoom] = useState<{ propertyId: string | null; index: number; scale: number }>({
+    propertyId: null,
+    index: 0,
+    scale: 1,
+  });
+  const [photoPan, setPhotoPan] = useState<{ propertyId: string | null; index: number; x: number; y: number }>({
+    propertyId: null,
+    index: 0,
+    x: 0,
+    y: 0,
+  });
+  const photoDragStart = useRef<{ pointerX: number; pointerY: number; panX: number; panY: number } | null>(null);
   const photoTouchStartX = useRef<number | null>(null);
   const createdPropertyId = useSyncExternalStore(
     subscribeToCreatedListing,
@@ -213,6 +226,12 @@ export default function ExplorePage() {
   const activeImageIndex = detailImages.length
     ? Math.min(activePhotoIndex, detailImages.length - 1)
     : 0;
+  const activePhotoZoom =
+    photoZoom.propertyId === selectedId && photoZoom.index === activePhotoIndex ? photoZoom.scale : 1;
+  const activePhotoPan =
+    photoPan.propertyId === selectedId && photoPan.index === activePhotoIndex
+      ? photoPan
+      : { x: 0, y: 0 };
   const detailHasCoordinates =
     typeof detail?.latitude === "number" &&
     typeof detail.longitude === "number" &&
@@ -228,20 +247,23 @@ export default function ExplorePage() {
             <h1 className="text-2xl font-semibold tracking-tight sm:mt-1 sm:text-4xl">Stay awhile, feel at home.</h1>
             <p className="mt-1 hidden text-sm text-stone-600 sm:block">Thoughtful local listings, starting in Cooch Behar.</p>
           </div>
-          <div className="flex h-9 items-center gap-1 rounded-xl border border-stone-200 bg-white px-2 shadow-sm">
-            <MapPin size={15} className="ml-1 shrink-0 text-emerald-700" />
+          <div className="w-full rounded-2xl border border-stone-200 bg-white p-2 shadow-sm sm:w-56">
+            <label htmlFor="explore-city" className="mb-1 flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-stone-500">
+              <MapPin size={13} className="text-emerald-700" />
+              Search location
+            </label>
             <Select value={city} onValueChange={(value) => {
               if (!value) return;
               setCity(value);
               setPage(0);
               searchMutation.reset();
             }}>
-              <SelectTrigger aria-label="Choose a city" className="h-8 w-36 border-0 px-1 font-semibold shadow-none focus-visible:ring-0 sm:w-40">
-                <SelectValue />
+              <SelectTrigger id="explore-city" aria-label="Choose a city" className="h-10 w-full rounded-xl border-stone-200 bg-stone-50 px-3 font-semibold shadow-none focus-visible:ring-2 focus-visible:ring-emerald-600">
+                <SelectValue placeholder="Choose a city" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent alignItemWithTrigger={false} className="min-w-52">
                 {(cities.length ? cities : [{ id: "cooch-behar", name: "Cooch Behar" }]).map((option) => (
-                  <SelectItem key={option.id} value={option.name}>{option.name}</SelectItem>
+                  <SelectItem key={option.id} value={option.name} className="min-h-10">{option.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -371,7 +393,7 @@ export default function ExplorePage() {
                 <Card key={property.id} className="group min-w-0 overflow-hidden rounded-3xl border border-stone-200 bg-white p-0 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-lg">
                   <button type="button" onClick={() => setSelectedProperty(property.id)} className="flex min-h-32 w-full min-w-0 gap-3 p-3 text-left sm:min-h-40 sm:gap-5 sm:p-4">
                   {property.image_urls?.[0] ? (
-                    <img src={property.image_urls[0]} alt="" loading="lazy" className="h-28 w-28 shrink-0 rounded-2xl object-cover sm:h-36 sm:w-40" />
+                    <img src={property.image_urls[0]} alt="" loading="lazy" className="h-28 w-28 shrink-0 rounded-2xl bg-stone-100 object-contain sm:h-36 sm:w-40" />
                   ) : (
                     <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-2xl bg-linear-to-br from-emerald-100 via-lime-50 to-amber-100 text-emerald-800 sm:h-36 sm:w-40">
                       <BedDouble size={30} />
@@ -457,15 +479,17 @@ export default function ExplorePage() {
             ) : detail ? (
               <>
                 <div
-                  className="relative h-48 shrink-0 touch-pan-y bg-linear-to-br from-emerald-100 to-lime-50 sm:h-60"
+                  className="relative h-48 shrink-0 touch-pan-y overflow-hidden bg-stone-100 sm:h-60"
+                  style={{ touchAction: activePhotoZoom > 1 ? "none" : "pan-y" }}
                   onTouchStart={(event) => {
+                    if (activePhotoZoom > 1) return;
                     photoTouchStartX.current = event.touches[0]?.clientX ?? null;
                   }}
                   onTouchEnd={(event) => {
                     const startX = photoTouchStartX.current;
                     const endX = event.changedTouches[0]?.clientX;
                     photoTouchStartX.current = null;
-                    if (startX === null || endX === undefined || detailImages.length < 2) return;
+                    if (activePhotoZoom > 1 || startX === null || endX === undefined || detailImages.length < 2) return;
                     const distance = endX - startX;
                     if (Math.abs(distance) < 40) return;
                     setPhotoSelection({
@@ -473,9 +497,43 @@ export default function ExplorePage() {
                       index: (activePhotoIndex + (distance < 0 ? 1 : -1) + detailImages.length) % detailImages.length,
                     });
                   }}
+                  onPointerDown={(event) => {
+                    if (activePhotoZoom <= 1 || (event.target instanceof Element && event.target.closest("button"))) return;
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    photoDragStart.current = {
+                      pointerX: event.clientX,
+                      pointerY: event.clientY,
+                      panX: activePhotoPan.x,
+                      panY: activePhotoPan.y,
+                    };
+                  }}
+                  onPointerMove={(event) => {
+                    const dragStart = photoDragStart.current;
+                    if (!dragStart) return;
+                    setPhotoPan({
+                      propertyId: selectedId,
+                      index: activeImageIndex,
+                      x: Math.max(-400, Math.min(400, dragStart.panX + event.clientX - dragStart.pointerX)),
+                      y: Math.max(-300, Math.min(300, dragStart.panY + event.clientY - dragStart.pointerY)),
+                    });
+                  }}
+                  onPointerUp={() => {
+                    photoDragStart.current = null;
+                  }}
+                  onPointerCancel={() => {
+                    photoDragStart.current = null;
+                  }}
                 >
                   {detailImages[activeImageIndex] ? (
-                    <img src={detailImages[activeImageIndex]} alt={`${detail.title}, photo ${activeImageIndex + 1}`} className="h-full w-full object-cover" />
+                    <img
+                      src={detailImages[activeImageIndex]}
+                      alt={`${detail.title}, photo ${activeImageIndex + 1}`}
+                      draggable={false}
+                      className={`h-full w-full object-contain transition-transform duration-200 ${activePhotoZoom > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
+                      style={{
+                        transform: `translate(${activePhotoPan.x}px, ${activePhotoPan.y}px) scale(${activePhotoZoom})`,
+                      }}
+                    />
                   ) : (
                     <div className="flex h-full items-center justify-center text-emerald-800"><BedDouble size={42} /></div>
                   )}
@@ -516,6 +574,41 @@ export default function ExplorePage() {
                         ))}
                       </div>
                     </>
+                  )}
+                  {detailImages[activeImageIndex] && (
+                    <div className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-stone-950/60 p-1 text-white shadow">
+                      <button
+                        type="button"
+                        aria-label="Zoom out"
+                        title="Zoom out"
+                        disabled={activePhotoZoom <= 1}
+                        onClick={() => {
+                          const scale = Math.max(1, activePhotoZoom - 0.5);
+                          setPhotoZoom({ propertyId: selectedId, index: activeImageIndex, scale });
+                          if (scale === 1) {
+                            setPhotoPan({ propertyId: selectedId, index: activeImageIndex, x: 0, y: 0 });
+                          }
+                        }}
+                        className="rounded-full p-2 transition hover:bg-white/20 disabled:opacity-40"
+                      >
+                        <ZoomOut size={17} />
+                      </button>
+                      <span className="min-w-10 text-center text-xs tabular-nums">{Math.round(activePhotoZoom * 100)}%</span>
+                      <button
+                        type="button"
+                        aria-label="Zoom in"
+                        title="Zoom in"
+                        disabled={activePhotoZoom >= 3}
+                        onClick={() => setPhotoZoom({
+                          propertyId: selectedId,
+                          index: activeImageIndex,
+                          scale: Math.min(3, activePhotoZoom + 0.5),
+                        })}
+                        className="rounded-full p-2 transition hover:bg-white/20 disabled:opacity-40"
+                      >
+                        <ZoomIn size={17} />
+                      </button>
+                    </div>
                   )}
                   <span className="absolute bottom-3 right-3 rounded-full bg-stone-950/55 px-2.5 py-1 text-xs text-white">
                     {detailImages.length ? `${activeImageIndex + 1} / ${detailImages.length}` : "No photos"}

@@ -89,7 +89,7 @@ export default function Home() {
                 <img
                   src={listings[0].image_urls[0]}
                   alt={listings[0].title}
-                  className="h-80 w-full rounded-[1.5rem] object-cover sm:h-96"
+                  className="h-80 w-full rounded-[1.5rem] bg-stone-100 object-contain sm:h-96"
                   fetchPriority="high"
                 />
               ) : (
@@ -143,7 +143,7 @@ export default function Home() {
               >
                 <Link href={`/explore?property=${listing.id}`}>
                   {listing.image_urls?.[0] ? (
-                    <img src={listing.image_urls[0]} alt={listing.title} loading="lazy" className="h-48 w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
+                    <img src={listing.image_urls[0]} alt={listing.title} loading="lazy" className="h-48 w-full bg-stone-100 object-contain transition duration-500" />
                   ) : (
                     <div className="flex h-48 items-center justify-center bg-linear-to-br from-emerald-100 to-lime-50 text-emerald-800"><BuildingIllustration /></div>
                   )}

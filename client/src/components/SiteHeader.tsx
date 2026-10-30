@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useSyncExternalStore } from "react";
-import { Building2, Heart, UserRound } from "lucide-react";
+import { useEffect, useSyncExternalStore } from "react";
+import { Building2, Heart, Moon, Sun, UserRound } from "lucide-react";
 import { getAuthSnapshot, getServerAuthSnapshot, subscribeToAuth } from "@/lib/auth-state";
+import { getServerThemeSnapshot, getThemeSnapshot, setTheme, subscribeToTheme } from "@/lib/theme";
 
 const links = [
   { href: "/explore", label: "Explore", mobileLabel: "Find" },
@@ -15,6 +16,12 @@ const links = [
 export default function SiteHeader() {
   const pathname = usePathname();
   const signedIn = useSyncExternalStore(subscribeToAuth, getAuthSnapshot, getServerAuthSnapshot);
+  const theme = useSyncExternalStore(subscribeToTheme, getThemeSnapshot, getServerThemeSnapshot);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    document.documentElement.style.colorScheme = theme;
+  }, [theme]);
 
   return (
     <header className="sticky top-0 z-30 border-b border-stone-200/80 bg-white/90 backdrop-blur-xl">
@@ -54,6 +61,15 @@ export default function SiteHeader() {
               <UserRound size={15} /> <span className="hidden sm:inline">Sign in</span>
             </Link>
           )}
+          <button
+            type="button"
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            className="ml-1 inline-flex size-9 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-700 transition hover:bg-stone-100"
+          >
+            {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+          </button>
         </div>
       </nav>
     </header>

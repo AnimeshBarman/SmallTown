@@ -10,7 +10,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { api } from "@/lib/api";
 import { processAndCompressImage } from "@/lib/compressor";
-import TurnstileCaptcha from "@/components/TurnstileCaptcha";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -94,8 +93,6 @@ export default function CreatePropertyPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
-  const [captchaRefreshKey, setCaptchaRefreshKey] = useState(0);
   const [successListingId, setSuccessListingId] = useState<string | null>(null);
 
   const quotaQuery = useQuery<{ limit: number; used: number; remaining: number; resets_at: string | null }>({
@@ -195,10 +192,6 @@ export default function CreatePropertyPage() {
   // Compress and batch upload to FastAPI
   const handleCompressAndUpload = async () => {
     if (selectedFiles.length === 0) return;
-    if (!captchaToken) {
-      setErrorMessage("Complete the security check before uploading photos.");
-      return;
-    }
     if (quotaQuery.data?.remaining === 0) {
       setErrorMessage("You have reached the limit of 3 listings in 24 hours.");
       return;
@@ -216,20 +209,16 @@ export default function CreatePropertyPage() {
       compressedFiles.forEach((file) => formData.append("files", file));
       const response = await api.post<{ urls: string[] }>(
         "/properties/upload-images",
-        formData,
-        { headers: { "X-Captcha-Token": captchaToken } }
+        formData
       );
 
       setUploadedImageUrls(response.data.urls);
       previewUrls.forEach((url) => URL.revokeObjectURL(url));
       setPreviewUrls([]);
       setSelectedFiles([]);
-      setCaptchaToken(null);
       setStep(3); // Advance to final review step
     } catch (err: unknown) {
       setErrorMessage(getErrorMessage(err, "Image compression or upload failed. Please try again."));
-      setCaptchaToken(null);
-      setCaptchaRefreshKey((key) => key + 1);
     } finally {
       setIsUploading(false);
     }
@@ -237,10 +226,6 @@ export default function CreatePropertyPage() {
 
   // Step C: Send clean JSON payload to create-property endpoint
   const onSubmit = async (data: PropertyFormValues) => {
-    if (!captchaToken) {
-      setErrorMessage("Complete the security check before publishing.");
-      return;
-    }
     if (quotaQuery.data?.remaining === 0) {
       setErrorMessage("You have reached the limit of 3 listings in 24 hours.");
       return;
@@ -256,16 +241,13 @@ export default function CreatePropertyPage() {
     try {
       const { data: createdProperty } = await api.post<{ id: string }>(
         "/properties/create-property",
-        payload,
-        { headers: { "X-Captcha-Token": captchaToken } }
+        payload
       );
       await queryClient.invalidateQueries({ queryKey: ["properties"] });
       await queryClient.invalidateQueries({ queryKey: ["properties", "listing-quota"] });
       setSuccessListingId(createdProperty.id);
     } catch (err: unknown) {
       setErrorMessage(getErrorMessage(err, "Failed to create property listing."));
-      setCaptchaToken(null);
-      setCaptchaRefreshKey((key) => key + 1);
     } finally {
       setIsSubmitting(false);
     }
@@ -281,8 +263,6 @@ export default function CreatePropertyPage() {
     setPreviewUrls([]);
     setUploadedImageUrls([]);
     setErrorMessage("");
-    setCaptchaToken(null);
-    setCaptchaRefreshKey((key) => key + 1);
     setSuccessListingId(null);
     void queryClient.invalidateQueries({ queryKey: ["properties", "listing-quota"] });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -598,7 +578,7 @@ export default function CreatePropertyPage() {
                 <div className="grid grid-cols-3 gap-4">
                   {previewUrls.map((url, idx) => (
                     <div key={idx} className="relative rounded-xl overflow-hidden h-28 border border-gray-200 group">
-                      <img src={url} alt={`Preview ${idx + 1}`} className="w-full h-full object-cover" />
+                      <img src={url} alt={`Preview ${idx + 1}`} className="w-full h-full bg-stone-100 object-contain" />
                       <button
                         type="button"
                         onClick={() => removeFile(idx)}
@@ -611,18 +591,13 @@ export default function CreatePropertyPage() {
                 </div>
               )}
 
-              <TurnstileCaptcha
-                key={`${step}-${captchaRefreshKey}`}
-                onTokenChange={setCaptchaToken}
-              />
-
               <div className="flex justify-between pt-4">
                 <Button variant="outline" onClick={() => setStep(1)}>
                   <ArrowLeft className="w-4 h-4 mr-2" /> Back
                 </Button>
                 <Button
                   onClick={handleCompressAndUpload}
-                  disabled={selectedFiles.length === 0 || isUploading || !captchaToken || quotaQuery.data?.remaining === 0}
+                  disabled={selectedFiles.length === 0 || isUploading || quotaQuery.data?.remaining === 0}
                   className="bg-emerald-700 text-white hover:bg-emerald-800"
                 >
                   {isUploading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
@@ -646,7 +621,7 @@ export default function CreatePropertyPage() {
               <div className="grid grid-cols-3 gap-4">
                 {uploadedImageUrls.map((url, idx) => (
                   <div key={idx} className="rounded-xl overflow-hidden border border-gray-200 h-28 shadow-sm">
-                    <img src={url} alt={`Uploaded ${idx + 1}`} className="w-full h-full object-cover" />
+                    <img src={url} alt={`Uploaded ${idx + 1}`} className="w-full h-full bg-stone-100 object-contain" />
                   </div>
                 ))}
               </div>
@@ -656,18 +631,13 @@ export default function CreatePropertyPage() {
                 <p><span className="font-semibold">Storage Provider:</span> Supabase Cloud Bucket</p>
               </div>
 
-              <TurnstileCaptcha
-                key={`${step}-${captchaRefreshKey}`}
-                onTokenChange={setCaptchaToken}
-              />
-
               <div className="flex justify-between pt-4">
                 <Button variant="outline" onClick={() => setStep(2)}>
                   <ArrowLeft className="w-4 h-4 mr-2" /> Back
                 </Button>
                 <Button
                   onClick={handleSubmit(onSubmit)}
-                  disabled={isSubmitting || !captchaToken || quotaQuery.data?.remaining === 0}
+                  disabled={isSubmitting || quotaQuery.data?.remaining === 0}
                   className="bg-green-600 hover:bg-green-700 text-white font-semibold"
                 >
                   {isSubmitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
