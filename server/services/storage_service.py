@@ -128,5 +128,9 @@ def _delete_images_from_storage(image_urls: list[str]) -> None:
     
     try:
         supabase.storage.from_(BUCKET_NAME).remove(filenames)
-    except Exception:
-            logger.exception("Failed to delete images from Supabase Storage..!")
+    except Exception as exc:
+        logger.exception("Failed to delete images from Supabase Storage..!")
+        raise HTTPException(
+            status_code=502,
+            detail="Image storage deletion failed.",
+        ) from exc

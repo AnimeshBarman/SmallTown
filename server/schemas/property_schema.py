@@ -82,6 +82,15 @@ class PropertyDetailResponse(PropertyResponse):
     contact_phone: Optional[str] = None
 
 
+class OwnerPropertyResponse(PropertyResponse):
+    moderation_reason: str | None = None
+    moderated_at: datetime | None = None
+
+
+class OwnerPropertyDetailResponse(OwnerPropertyResponse):
+    contact_phone: str | None = None
+
+
 class PropertyPageResponse(BaseModel):
     items: list[PropertyResponse]
     total: int

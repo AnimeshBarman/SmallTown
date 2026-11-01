@@ -18,6 +18,9 @@ AI_SEARCH_WINDOW_SECONDS = 60
 UPLOAD_BATCH_LIMIT_PER_OWNER = 10
 UPLOAD_BATCH_LIMIT_PER_IP = 30
 UPLOAD_BATCH_WINDOW_SECONDS = 60 * 60
+LISTING_REPORT_LIMIT_PER_USER = 5
+LISTING_REPORT_LIMIT_PER_IP = 20
+LISTING_REPORT_WINDOW_SECONDS = 60 * 60
 
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
 LOGIN_FAILURES_PER_IP = 30
@@ -181,6 +184,25 @@ async def rate_limit_image_upload(request: Request, owner_id: str) -> None:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many photo upload attempts. Please try again in an hour.",
             headers={"Retry-After": str(max(1, int(result[1])))},
+        )
+
+
+async def rate_limit_listing_report(request: Request, user_id: str) -> None:
+    ip_hash = _digest(_client_ip(request))
+    user_hash = _digest(str(user_id))
+    ip_count = await _increment_fixed_window(
+        f"rate_limit:listing-report:ip:{ip_hash}",
+        LISTING_REPORT_WINDOW_SECONDS,
+    )
+    user_count = await _increment_fixed_window(
+        f"rate_limit:listing-report:user:{user_hash}",
+        LISTING_REPORT_WINDOW_SECONDS,
+    )
+    if ip_count > LISTING_REPORT_LIMIT_PER_IP or user_count > LISTING_REPORT_LIMIT_PER_USER:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many listing reports. Please try again later.",
+            headers={"Retry-After": str(LISTING_REPORT_WINDOW_SECONDS)},
         )
 
 

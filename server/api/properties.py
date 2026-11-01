@@ -14,14 +14,17 @@ import os
 from uuid import UUID
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import get_db
-from models.db_models import City, Property, PropertyView, Profile, SavedProperty
+from models.db_models import City, ListingDeletionNotice, Property, PropertyView, Profile, SavedProperty
 from schemas.property_schema import (
+    OwnerPropertyResponse,
     PropertyCreate,
     PropertyDetailResponse,
     PropertyPageResponse,
     PropertyResponse,
     PropertyUpdate,
+    OwnerPropertyDetailResponse,
 )
+from schemas.moderation_schema import OwnerListingDeletionNoticeResponse
 from services.storage_service import (process_and_upload_image, delete_images_from_storage)
 from rate_limiter import rate_limit_image_upload
 
@@ -75,7 +78,14 @@ def _enforce_listing_quota(db: Session, owner_id) -> None:
         )
 
 
-def _property_rows(db: Session, query, *, limit: int | None = None, offset: int = 0):
+def _property_rows(
+    db: Session,
+    query,
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+    include_owner_moderation: bool = False,
+):
     query = query.outerjoin(Profile, Profile.id == Property.owner_id).with_entities(
         Property,
         func.ST_Y(cast(Property.coordinates, Geometry)).label("latitude"),
@@ -85,15 +95,19 @@ def _property_rows(db: Session, query, *, limit: int | None = None, offset: int 
     if limit is not None:
         query = query.limit(limit).offset(offset)
     property_rows = query.all()
-    return [
-        {
+    rows = []
+    for property_record, latitude, longitude, owner_name in property_rows:
+        row = {
             **PropertyResponse.model_validate(property_record).model_dump(),
             "latitude": latitude,
             "longitude": longitude,
             "owner_name": owner_name,
         }
-        for property_record, latitude, longitude, owner_name in property_rows
-    ]
+        if include_owner_moderation:
+            row["moderation_reason"] = property_record.moderation_reason
+            row["moderated_at"] = property_record.moderated_at
+        rows.append(row)
+    return rows
 
 
 @router.get("/cities")
@@ -149,7 +163,7 @@ def get_all_properties(
     }
 
 
-@router.get("/mine", response_model=List[PropertyResponse])
+@router.get("/mine", response_model=List[OwnerPropertyResponse])
 def get_my_properties(
     db: Session = Depends(get_db),
     current_user: Profile = Depends(get_current_user),
@@ -159,7 +173,7 @@ def get_my_properties(
         .filter(Property.owner_id == current_user.id)
         .order_by(Property.created_at.desc())
     )
-    return _property_rows(db, query)
+    return _property_rows(db, query, include_owner_moderation=True)
 
 
 @router.get("/saved", response_model=List[PropertyResponse])
@@ -174,6 +188,23 @@ def get_saved_properties(
         .order_by(SavedProperty.created_at.desc())
     )
     return _property_rows(db, query)
+
+
+@router.get(
+    "/deletion-notices",
+    response_model=List[OwnerListingDeletionNoticeResponse],
+)
+def get_my_listing_deletion_notices(
+    db: Session = Depends(get_db),
+    current_user: Profile = Depends(get_current_user),
+):
+    return (
+        db.query(ListingDeletionNotice)
+        .filter(ListingDeletionNotice.owner_id == current_user.id)
+        .order_by(ListingDeletionNotice.deleted_at.desc())
+        .limit(100)
+        .all()
+    )
 
 
 @router.get("/listing-quota")
@@ -221,6 +252,34 @@ def get_property_detail(property_id: UUID, db: Session = Depends(get_db)):
         "longitude": longitude,
         "contact_phone": contact_phone,
         "owner_name": owner_name,
+    }
+
+
+@router.get("/{property_id}/manage", response_model=OwnerPropertyDetailResponse)
+def get_property_for_management(
+    property_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Profile = Depends(get_current_user),
+):
+    property_record = db.query(Property).filter(Property.id == property_id).first()
+    if property_record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Property not found.")
+    if property_record.owner_id != current_user.id and current_user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to manage this property.")
+
+    coordinates = db.query(
+        func.ST_Y(cast(Property.coordinates, Geometry)).label("latitude"),
+        func.ST_X(cast(Property.coordinates, Geometry)).label("longitude"),
+    ).filter(Property.id == property_id).first()
+    owner_name = db.query(Profile.fullname).filter(Profile.id == property_record.owner_id).scalar()
+    return {
+        **PropertyResponse.model_validate(property_record).model_dump(),
+        "latitude": coordinates.latitude,
+        "longitude": coordinates.longitude,
+        "owner_name": owner_name,
+        "contact_phone": property_record.contact_phone,
+        "moderation_reason": property_record.moderation_reason,
+        "moderated_at": property_record.moderated_at,
     }
 
 
@@ -366,7 +425,12 @@ async def delete_property(
     if not property_record:
         raise HTTPException(status_code=404, detail="Property not found")
         
-    if str(property_record.owner_id) != str(current_user.id) and current_user.role != "admin":
+    if property_record.owner_id != current_user.id:
+        if current_user.role == "admin":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Use the admin panel to restrict a listing so the owner can see the reason.",
+            )
         raise HTTPException(status_code=403, detail="Not authorized to delete this property.")
 
     if property_record.image_urls:

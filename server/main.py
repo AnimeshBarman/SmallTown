@@ -11,6 +11,7 @@ from models.db_models import Base
 from api.properties import router as properties_router
 from api.auth import router as auth_router
 from api.search import router as search_router
+from api.moderation import router as moderation_router
 
 
 @asynccontextmanager
@@ -21,6 +22,35 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS address VARCHAR;"))
         conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS city VARCHAR;"))
         conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS contact_phone VARCHAR;"))
+        conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS moderation_reason TEXT;"))
+        conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS moderated_at TIMESTAMPTZ;"))
+        conn.execute(text(
+            "ALTER TABLE properties ADD COLUMN IF NOT EXISTS "
+            "moderated_by_id UUID REFERENCES profiles(id) ON DELETE SET NULL;"
+        ))
+        conn.execute(text("""
+            DO $$
+            DECLARE
+                enum_schema TEXT;
+            BEGIN
+                SELECT namespace.nspname
+                INTO enum_schema
+                FROM pg_type AS enum_type
+                JOIN pg_namespace AS namespace ON namespace.oid = enum_type.typnamespace
+                WHERE enum_type.typname = 'property_status'
+                  AND enum_type.typtype = 'e'
+                LIMIT 1;
+
+                IF enum_schema IS NOT NULL THEN
+                    EXECUTE format(
+                        'ALTER TYPE %I.property_status ADD VALUE IF NOT EXISTS %L',
+                        enum_schema,
+                        'removed'
+                    );
+                END IF;
+            END
+            $$;
+        """))
         conn.execute(text(
             "ALTER TABLE cities ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT FALSE;"
         ))
@@ -37,6 +67,10 @@ async def lifespan(app: FastAPI):
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_properties_city_created_at "
             "ON properties (city, created_at DESC);"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_properties_status_city_created_at "
+            "ON properties (status, city, created_at DESC);"
         ))
         city_values = {
             "id": uuid.uuid4(),
@@ -71,7 +105,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan, title="Welcome to SmallTown Api", version="1.0.0")
 
 origins = [
-    "http://localhost:3000"
+    "http://localhost:3000",
+    "http://192.168.1.8:3000",
 ]
 
 app.add_middleware(
@@ -85,6 +120,7 @@ app.add_middleware(
 app.include_router(properties_router, prefix="/api/v1/properties", tags=["Properties"])
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(search_router, prefix="/api/v1/search", tags=["AI Search"])
+app.include_router(moderation_router, prefix="/api/v1", tags=["Moderation"])
 
 
 

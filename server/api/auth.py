@@ -11,9 +11,11 @@ from google.oauth2 import id_token as google_id_token
 import sys
 import os
 import uuid
+from datetime import datetime, timezone
+from sqlalchemy import text
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import get_db
-from models.db_models import Profile
+from models.db_models import Profile, ProfileNameChange
 from schemas.user_schema import (
     GoogleLoginRequest,
     ProfileCreate,
@@ -37,11 +39,48 @@ from rate_limiter import (
 
 router = APIRouter()
 DUMMY_PASSWORD_HASH = get_password_hash("smalltown-login-timing-equalization")
+PROFILE_NAME_CHANGE_LIMIT = 3
+
+
+def _name_change_quota(db: Session, user_id: uuid.UUID) -> dict:
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if month_start.month == 12:
+        reset_at = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        reset_at = month_start.replace(month=month_start.month + 1)
+
+    used = db.query(func.count(ProfileNameChange.id)).filter(
+        ProfileNameChange.user_id == user_id,
+        ProfileNameChange.changed_at >= month_start,
+    ).scalar() or 0
+    return {
+        "name_changes_limit": PROFILE_NAME_CHANGE_LIMIT,
+        "name_changes_used": used,
+        "name_changes_remaining": max(0, PROFILE_NAME_CHANGE_LIMIT - used),
+        "name_changes_reset_at": reset_at,
+    }
+
+
+def _profile_response(current_user: Profile, db: Session) -> dict:
+    return {
+        "id": current_user.id,
+        "fullname": current_user.fullname,
+        "email": current_user.email,
+        "role": current_user.role,
+        "phone": current_user.phone,
+        "avatar_url": current_user.avatar_url,
+        "created_at": current_user.created_at,
+        **_name_change_quota(db, current_user.id),
+    }
 
 
 @router.get("/me", response_model=ProfileResponse)
-def get_my_profile(current_user: Profile = Depends(get_current_user)):
-    return current_user
+def get_my_profile(
+    current_user: Profile = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return _profile_response(current_user, db)
 
 
 @router.patch("/me", response_model=ProfileResponse)
@@ -50,11 +89,35 @@ def update_my_profile(
     current_user: Profile = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    for field, value in profile_data.model_dump(exclude_unset=True).items():
+    updates = profile_data.model_dump(exclude_unset=True)
+    name_changed = False
+
+    if "fullname" in updates:
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": f"smalltown:profile-name-limit:{current_user.id}"},
+        )
+        db.refresh(current_user)
+        name_changed = updates["fullname"] != current_user.fullname
+        if name_changed:
+            quota = _name_change_quota(db, current_user.id)
+            if quota["name_changes_remaining"] == 0:
+                reset_date = quota["name_changes_reset_at"].date().isoformat()
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=(
+                        "You can change your name up to 3 times per calendar month. "
+                        f"Your limit resets on {reset_date}."
+                    ),
+                )
+
+    for field, value in updates.items():
         setattr(current_user, field, value)
+    if name_changed:
+        db.add(ProfileNameChange(user_id=current_user.id))
     db.commit()
     db.refresh(current_user)
-    return current_user
+    return _profile_response(current_user, db)
 
 
 def _create_session_tokens(user: Profile, db: Session) -> dict[str, str]:
@@ -215,9 +278,9 @@ def sync_user_profile(
         existing_profile = db.query(Profile).filter(Profile.id == user_data.id).first()
         
         if existing_profile:
-            # Update existing data
             existing_profile.email = user_data.email
-            existing_profile.fullname = user_data.fullname
+            if existing_profile.fullname is None:
+                existing_profile.fullname = user_data.fullname
             existing_profile.avatar_url = user_data.avatar_url
             db.commit()
             return {"message": "Profile updated successfully", "profile_id": existing_profile.id}
