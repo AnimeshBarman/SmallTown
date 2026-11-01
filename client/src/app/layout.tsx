@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import Providers from "@/components/Providers";
 import SiteHeader from "@/components/SiteHeader";
+import SiteFooter from "@/components/SiteFooter";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -29,10 +30,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         <Providers>
-          <Suspense fallback={<header className="h-[57px] shrink-0 border-b border-stone-200/80 bg-white" />}>
+          <Suspense fallback={<header className="h-14.25 shrink-0 border-b border-stone-200/80 bg-white" />}>
             <SiteHeader />
           </Suspense>
           {children}
+          <SiteFooter />
         </Providers>
       </body>
     </html>

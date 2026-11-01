@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
-  ArrowLeft, ArrowRight, BedDouble, ChevronLeft, ChevronRight, Heart, Loader2, MapPin, Phone, Search, ShieldCheck, Sparkles, X,
+  ArrowLeft, ArrowRight, BedDouble, ChevronLeft, ChevronRight, Flag, Heart, Loader2, MapPin, Phone, Search, ShieldCheck, Sparkles, X,
   ZoomIn, ZoomOut,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -14,6 +14,7 @@ import { formatPostedAgo } from "@/lib/relative-time";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   clearCreatedListing,
@@ -34,7 +35,7 @@ type ListingSort = "newest" | "oldest" | "price_asc";
 
 const PropertyMap = dynamic(() => import("@/components/PropertyMap"), {
   ssr: false,
-  loading: () => <div className="flex h-96 items-center justify-center rounded-3xl bg-stone-100"><Loader2 className="animate-spin text-emerald-700" /></div>,
+  loading: () => <div aria-label="Loading map" className="h-96 animate-pulse rounded-3xl bg-stone-100 dark:bg-stone-900" />,
 });
 
 type PropertySummary = {
@@ -56,9 +57,30 @@ type PropertySummary = {
 };
 
 type PropertyDetail = PropertySummary & { contact_phone?: string | null };
+type ListingReportReason = "suspicious" | "inaccurate" | "inappropriate" | "other";
 type City = { id: string; name: string; state?: string | null };
 type PropertyPage = { items: PropertySummary[]; total: number; limit: number; offset: number };
 type LegacyPropertyPage = PropertySummary[];
+
+function createVisitorId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+
+  const bytes = new Uint8Array(16);
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 function getSearchErrorMessage(error: unknown) {
   if (isAxiosError<{ detail?: unknown }>(error)) {
@@ -82,6 +104,9 @@ export default function ExplorePage() {
   const [sort, setSort] = useState<ListingSort>("newest");
   const [page, setPage] = useState(0);
   const [searchText, setSearchText] = useState("");
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState<ListingReportReason>("suspicious");
+  const [reportDetails, setReportDetails] = useState("");
   const [photoSelection, setPhotoSelection] = useState<{ propertyId: string | null; index: number }>({
     propertyId: null,
     index: 0,
@@ -114,6 +139,7 @@ export default function ExplorePage() {
   const { data: cities = [] } = useQuery<City[]>({
     queryKey: ["cities"],
     queryFn: async () => (await api.get<City[]>("/properties/cities")).data,
+    staleTime: 5 * 60 * 1000,
   });
 
   const propertiesQuery = useQuery<PropertyPage>({
@@ -134,6 +160,8 @@ export default function ExplorePage() {
       return data;
     },
     retry: false,
+    staleTime: 30 * 1000,
+    placeholderData: keepPreviousData,
   });
   const properties = propertiesQuery.data?.items ?? [];
   const totalPages = Math.ceil((propertiesQuery.data?.total ?? 0) / PAGE_SIZE);
@@ -163,18 +191,10 @@ export default function ExplorePage() {
     queryKey: ["property", selectedId],
     enabled: Boolean(selectedId),
     queryFn: async () => {
-      const propertyId = selectedId!;
-      let visitorId = localStorage.getItem("smalltown_visitor_id");
-      if (!visitorId) {
-        visitorId = crypto.randomUUID();
-        localStorage.setItem("smalltown_visitor_id", visitorId);
-      }
-      await api.post(`/properties/${propertyId}/view`, null, {
-        headers: { "X-Visitor-ID": visitorId },
-      });
-      const { data } = await api.get<PropertyDetail>(`/properties/${propertyId}`);
+      const { data } = await api.get<PropertyDetail>(`/properties/${selectedId}`);
       return data;
     },
+    staleTime: 2 * 60 * 1000,
   });
 
   const savedQuery = useQuery<{ saved: boolean }>({
@@ -200,14 +220,71 @@ export default function ExplorePage() {
     },
   });
 
+  const reportMutation = useMutation({
+    mutationFn: async (report: {
+      propertyId: string;
+      reason: ListingReportReason;
+      details: string;
+    }) => api.post(`/properties/${report.propertyId}/reports`, {
+      reason: report.reason,
+      details: report.details.trim() || undefined,
+    }),
+    onSuccess: async () => {
+      setReportDetails("");
+      await queryClient.invalidateQueries({ queryKey: ["moderation", "reports"] });
+    },
+  });
+
+  const resetReportMutation = reportMutation.reset;
+  const closePropertyDetails = useCallback(() => {
+    setReportOpen(false);
+    setReportDetails("");
+    resetReportMutation();
+    setSelectedProperty(null);
+  }, [resetReportMutation]);
+
   useEffect(() => {
     if (!selectedId) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSelectedProperty(null);
+      if (event.key === "Escape") closePropertyDetails();
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [selectedId, closePropertyDetails]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    let visitorId = localStorage.getItem("smalltown_visitor_id");
+    if (!visitorId) {
+      visitorId = createVisitorId();
+      localStorage.setItem("smalltown_visitor_id", visitorId);
+    }
+
+    void api.post(`/properties/${selectedId}/view`, null, {
+      headers: { "X-Visitor-ID": visitorId },
+    }).catch((error: unknown) => {
+      console.error("Could not record listing view.", error);
+    });
   }, [selectedId]);
+
+  const warmPropertyDetails = (property: PropertySummary) => {
+    void queryClient.prefetchQuery({
+      queryKey: ["property", property.id],
+      queryFn: async () => (await api.get<PropertyDetail>(`/properties/${property.id}`)).data,
+      staleTime: 2 * 60 * 1000,
+    });
+  };
+
+  const openProperty = (property: PropertySummary) => {
+    if (!queryClient.getQueryData<PropertyDetail>(["property", property.id])) {
+      queryClient.setQueryData<PropertyDetail>(
+        ["property", property.id],
+        { ...property },
+        { updatedAt: 0 },
+      );
+    }
+    setSelectedProperty(property.id);
+  };
 
   const mapProperties = displayedProperties.filter(
     (property): property is PropertySummary & { latitude: number; longitude: number } =>
@@ -270,7 +347,7 @@ export default function ExplorePage() {
           </div>
         </div>
 
-        <Card className="mb-4 rounded-2xl border-emerald-100 bg-linear-to-r from-emerald-50 via-white to-lime-50 p-2.5 shadow-sm sm:p-3">
+        <Card className="mb-4 rounded-2xl border-emerald-100 bg-linear-to-r from-emerald-50 via-white to-lime-50 p-2.5 shadow-sm dark:border-stone-700 dark:bg-none dark:bg-stone-900 sm:p-3">
           <form
             className="flex gap-2"
             onSubmit={(event) => {
@@ -292,7 +369,7 @@ export default function ExplorePage() {
                 placeholder="Try “PG under ₹8,000 near college”"
                 minLength={5}
                 maxLength={200}
-                className="h-10 rounded-xl border-emerald-100 bg-white pl-9 text-sm sm:text-base"
+                className="h-10 rounded-xl border-emerald-100 bg-white pl-9 text-sm text-stone-900 placeholder:text-stone-400 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100 dark:placeholder:text-stone-500 sm:text-base"
               />
             </div>
             <Button
@@ -309,7 +386,7 @@ export default function ExplorePage() {
                 type="button"
                 variant="outline"
                 onClick={() => searchMutation.reset()}
-                className="h-10 rounded-xl px-3"
+                className="h-10 rounded-xl border-stone-300 bg-white px-3 text-stone-800 hover:bg-stone-100 hover:text-stone-950 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100 dark:hover:bg-stone-700 dark:hover:text-white"
               >
                 <span className="hidden sm:inline">Clear</span>
                 <X className="size-4 sm:hidden" />
@@ -358,6 +435,9 @@ export default function ExplorePage() {
             {searchMutation.isSuccess
               ? `${sortedDisplayedProperties.length} search results`
               : `${propertiesQuery.data?.total ?? 0} places`}
+            {propertiesQuery.isFetching && propertiesQuery.isPlaceholderData ? (
+              <span className="ml-2 text-xs text-emerald-700">Updating…</span>
+            ) : null}
           </p>
           <Select value={sort} onValueChange={(value) => {
             if (value === "newest" || value === "oldest" || value === "price_asc") {
@@ -377,9 +457,23 @@ export default function ExplorePage() {
         </div>
 
         {propertiesQuery.isLoading ? (
-          <div className="flex h-24 items-center justify-center gap-2 rounded-2xl border border-stone-200 bg-white text-sm text-stone-600" role="status">
-            <Loader2 size={18} className="animate-spin text-emerald-700" />
-            <span>Loading nearby places…</span>
+          <div className="grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]" role="status" aria-label="Loading nearby places">
+            <div className="min-w-0 space-y-4">
+              {Array.from({ length: 3 }, (_, index) => (
+                <Card key={index} className="flex min-h-32 gap-3 overflow-hidden rounded-3xl border border-stone-200 bg-white p-3 shadow-sm dark:border-stone-700 dark:bg-stone-900 sm:min-h-40 sm:gap-5 sm:p-4">
+                  <div className="h-28 w-28 shrink-0 animate-pulse rounded-2xl bg-stone-200 dark:bg-stone-800 sm:h-36 sm:w-40" />
+                  <div className="flex min-w-0 flex-1 flex-col justify-center gap-3">
+                    <div className="h-5 w-16 animate-pulse rounded-full bg-emerald-100 dark:bg-emerald-950" />
+                    <div className="h-5 w-4/5 animate-pulse rounded-md bg-stone-200 dark:bg-stone-800" />
+                    <div className="h-4 w-2/3 animate-pulse rounded-md bg-stone-100 dark:bg-stone-800" />
+                    <div className="h-7 w-28 animate-pulse rounded-lg bg-emerald-100 dark:bg-emerald-950" />
+                  </div>
+                </Card>
+              ))}
+            </div>
+            <div className="hidden lg:sticky lg:top-24 lg:block">
+              <div className="h-96 animate-pulse rounded-3xl border border-stone-200 bg-stone-100 dark:border-stone-700 dark:bg-stone-900" />
+            </div>
           </div>
         ) : propertiesQuery.isError ? (
           <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
@@ -391,7 +485,13 @@ export default function ExplorePage() {
             <section aria-label="Available places" className="min-w-0 space-y-4">
               {sortedDisplayedProperties.map((property) => (
                 <Card key={property.id} className="group min-w-0 overflow-hidden rounded-3xl border border-stone-200 bg-white p-0 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-lg">
-                  <button type="button" onClick={() => setSelectedProperty(property.id)} className="flex min-h-32 w-full min-w-0 gap-3 p-3 text-left sm:min-h-40 sm:gap-5 sm:p-4">
+                  <button
+                    type="button"
+                    onClick={() => openProperty(property)}
+                    onPointerEnter={() => warmPropertyDetails(property)}
+                    onFocus={() => warmPropertyDetails(property)}
+                    className="flex min-h-32 w-full min-w-0 gap-3 p-3 text-left sm:min-h-40 sm:gap-5 sm:p-4"
+                  >
                   {property.image_urls?.[0] ? (
                     <img src={property.image_urls[0]} alt="" loading="lazy" className="h-28 w-28 shrink-0 rounded-2xl bg-stone-100 object-contain sm:h-36 sm:w-40" />
                   ) : (
@@ -452,7 +552,7 @@ export default function ExplorePage() {
         <div
           className="fixed inset-0 z-50 flex items-end justify-center bg-stone-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-6"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setSelectedProperty(null);
+            if (event.target === event.currentTarget) closePropertyDetails();
           }}
         >
           <Card
@@ -463,14 +563,22 @@ export default function ExplorePage() {
           >
             <button
               type="button"
-              onClick={() => setSelectedProperty(null)}
+              onClick={closePropertyDetails}
               aria-label="Close details"
               className="absolute right-4 top-4 z-10 rounded-full bg-white/90 p-2 text-stone-700 shadow hover:bg-white"
             >
               <X size={20} />
             </button>
             {detailQuery.isLoading ? (
-              <div className="flex h-80 items-center justify-center"><Loader2 className="animate-spin text-emerald-700" /></div>
+              <div aria-label="Loading listing details" className="animate-pulse">
+                <div className="h-48 bg-stone-200 dark:bg-stone-800 sm:h-60" />
+                <div className="space-y-4 p-5 sm:p-6">
+                  <div className="h-7 w-3/4 rounded-md bg-stone-200 dark:bg-stone-800" />
+                  <div className="h-5 w-1/3 rounded-md bg-stone-100 dark:bg-stone-800" />
+                  <div className="h-10 w-1/2 rounded-xl bg-emerald-100 dark:bg-emerald-950" />
+                  <div className="h-24 rounded-2xl bg-stone-100 dark:bg-stone-800" />
+                </div>
+              </div>
             ) : detailQuery.isError ? (
               <div role="alert" className="p-8 text-center">
                 <p className="font-semibold">We couldn&apos;t open this listing.</p>
@@ -671,10 +779,107 @@ export default function ExplorePage() {
                       Couldn&apos;t update your saved places. Please try again.
                     </p>
                   )}
+                  <div className="mt-5 border-t border-stone-200 pt-4">
+                    {reportMutation.isSuccess && reportMutation.variables?.propertyId === selectedId ? (
+                      <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900">
+                        Thanks for letting us know. Your report has been sent for review.
+                      </p>
+                    ) : (
+                      <>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            if (!signedIn) {
+                              router.push(`/login?next=${encodeURIComponent(`/explore?property=${selectedId}`)}`);
+                              return;
+                            }
+                            reportMutation.reset();
+                            setReportOpen((open) => !open);
+                          }}
+                          className="h-10 rounded-full border-stone-300 text-stone-700"
+                        >
+                          <Flag size={16} /> Report listing
+                        </Button>
+                        {reportOpen && (
+                          <form
+                            className="mt-4 space-y-3 rounded-2xl border border-stone-200 bg-stone-50 p-4"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              if (!selectedId) return;
+                              reportMutation.mutate({
+                                propertyId: selectedId,
+                                reason: reportReason,
+                                details: reportDetails,
+                              });
+                            }}
+                          >
+                            <label htmlFor="report-reason" className="block text-sm font-semibold text-stone-800">
+                              What is the issue?
+                            </label>
+                            <select
+                              id="report-reason"
+                              value={reportReason}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                if (value === "suspicious" || value === "inaccurate" || value === "inappropriate" || value === "other") {
+                                  setReportReason(value);
+                                }
+                              }}
+                              className="h-11 w-full rounded-xl border border-stone-300 bg-white px-3 text-sm text-stone-900"
+                            >
+                              <option value="suspicious">Suspicious or possibly fraudulent</option>
+                              <option value="inaccurate">Inaccurate or unavailable</option>
+                              <option value="inappropriate">Inappropriate content</option>
+                              <option value="other">Something else</option>
+                            </select>
+                            <label htmlFor="report-details" className="block text-sm font-semibold text-stone-800">
+                              Add details <span className="font-normal text-stone-500">(optional)</span>
+                            </label>
+                            <Textarea
+                              id="report-details"
+                              value={reportDetails}
+                              onChange={(event) => setReportDetails(event.target.value)}
+                              maxLength={1000}
+                              rows={3}
+                              placeholder="Tell us what seems wrong. Please don't include passwords or payment details."
+                              className="bg-white"
+                            />
+                            {reportMutation.isError && (
+                              <p role="alert" className="text-sm text-red-700">
+                                {getSearchErrorMessage(reportMutation.error)}
+                              </p>
+                            )}
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={reportMutation.isPending}
+                                onClick={() => setReportOpen(false)}
+                                className="rounded-full"
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                type="submit"
+                                disabled={reportMutation.isPending}
+                                className="rounded-full bg-emerald-700 text-white hover:bg-emerald-800"
+                              >
+                                {reportMutation.isPending && <Loader2 size={16} className="animate-spin" />}
+                                Send report
+                              </Button>
+                            </div>
+                          </form>
+                        )}
+                      </>
+                    )}
+                  </div>
                   {detail.contact_phone ? (
                     <a href={`tel:${detail.contact_phone}`} className="mt-5 flex h-12 items-center justify-center gap-2 rounded-full bg-emerald-700 font-semibold text-white transition hover:bg-emerald-800">
                       <Phone size={17} /> Call owner · {detail.contact_phone}
                     </a>
+                  ) : detailQuery.isFetching && detail.contact_phone === undefined ? (
+                    <p role="status" className="mt-5 h-12 animate-pulse rounded-2xl bg-stone-100 dark:bg-stone-800" />
                   ) : (
                     <p className="mt-5 rounded-2xl bg-amber-50 p-3 text-sm text-amber-900">The owner has not added a contact number yet.</p>
                   )}

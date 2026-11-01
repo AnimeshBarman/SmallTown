@@ -38,6 +38,8 @@ type PropertyDetail = EditForm & {
   latitude: number | null;
   longitude: number | null;
   image_urls?: string[];
+  status: string;
+  moderation_reason?: string | null;
 };
 type City = {
   id: string;
@@ -55,9 +57,33 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Could not update this listing.";
 }
 
+function EditPropertySkeleton() {
+  return (
+    <main className="min-h-[60vh] flex-1 bg-[#faf9f6] px-4 py-8 sm:px-6">
+      <div aria-label="Loading listing editor" className="mx-auto max-w-2xl animate-pulse">
+        <div className="mb-4 h-9 w-36 rounded-full bg-stone-200 dark:bg-stone-800" />
+        <div className="space-y-6 rounded-3xl border border-stone-200 bg-white p-6 dark:border-stone-700 dark:bg-stone-900 sm:p-8">
+          <div className="space-y-3">
+            <div className="h-7 w-48 rounded bg-stone-200 dark:bg-stone-800" />
+            <div className="h-4 w-72 max-w-full rounded bg-stone-100 dark:bg-stone-800" />
+          </div>
+          {Array.from({ length: 5 }, (_, index) => (
+            <div key={index} className="space-y-2">
+              <div className="h-4 w-24 rounded bg-stone-200 dark:bg-stone-800" />
+              <div className="h-11 rounded-xl bg-stone-100 dark:bg-stone-800" />
+            </div>
+          ))}
+          <div className="h-48 rounded-2xl bg-stone-100 dark:bg-stone-800" />
+          <div className="h-11 rounded-xl bg-emerald-100 dark:bg-emerald-950" />
+        </div>
+      </div>
+    </main>
+  );
+}
+
 export default function EditPropertyPage() {
   return (
-    <Suspense fallback={<main className="flex min-h-[60vh] flex-1 items-center justify-center"><Loader2 className="animate-spin text-emerald-700" /></main>}>
+    <Suspense fallback={<EditPropertySkeleton />}>
       <EditPropertyForm />
     </Suspense>
   );
@@ -71,13 +97,15 @@ function EditPropertyForm() {
   const [errorMessage, setErrorMessage] = useState("");
 
   const propertyQuery = useQuery<PropertyDetail>({
-    queryKey: ["property", id],
-    queryFn: async () => (await api.get<PropertyDetail>(`/properties/${id}`)).data,
+    queryKey: ["property-management", id],
+    queryFn: async () => (await api.get<PropertyDetail>(`/properties/${id}/manage`)).data,
     enabled: Boolean(id),
+    staleTime: 2 * 60 * 1000,
   });
   const citiesQuery = useQuery<City[]>({
     queryKey: ["cities"],
     queryFn: async () => (await api.get<City[]>("/properties/cities")).data,
+    staleTime: 5 * 60 * 1000,
   });
   const form = useForm<EditFormInput, unknown, EditForm>({
     resolver: zodResolver(editSchema),
@@ -132,6 +160,7 @@ function EditPropertyForm() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["properties"] }),
         queryClient.invalidateQueries({ queryKey: ["property", id] }),
+        queryClient.invalidateQueries({ queryKey: ["property-management", id] }),
       ]);
       router.push("/account#listings");
     },
@@ -139,7 +168,7 @@ function EditPropertyForm() {
   });
 
   if (propertyQuery.isLoading) {
-    return <main className="flex min-h-[60vh] flex-1 items-center justify-center"><Loader2 className="animate-spin text-emerald-700" /></main>;
+    return <EditPropertySkeleton />;
   }
   if (propertyQuery.isError || !propertyQuery.data) {
     return (
@@ -163,6 +192,17 @@ function EditPropertyForm() {
             <p className="text-sm text-stone-500">Update details, contact information, and map location.</p>
           </CardHeader>
           <CardContent>
+            {propertyQuery.data.status !== "active" && (
+              <div role="status" className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+                <strong>This listing is currently restricted and is not public.</strong>
+                <p className="mt-1">{propertyQuery.data.moderation_reason || "An administrator restricted this listing."}</p>
+                <p className="mt-1">
+                  You can edit it here, but changes will not make it public again. Contact{" "}
+                  <a className="font-semibold underline" href="mailto:smalltowntier3@gmail.com">support</a>
+                  {" "}if you believe it is ready to be restored.
+                </p>
+              </div>
+            )}
             {errorMessage && <p role="alert" className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-800">{errorMessage}</p>}
             <form onSubmit={form.handleSubmit((values) => {
               setErrorMessage("");

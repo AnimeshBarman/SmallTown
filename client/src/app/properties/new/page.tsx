@@ -307,10 +307,22 @@ export default function CreatePropertyPage() {
 
   if (quotaQuery.isPending) {
     return (
-      <main className="flex min-h-[60vh] flex-1 items-center justify-center bg-[#faf9f6] px-4">
-        <div role="status" className="flex items-center gap-3 text-stone-600">
-          <Loader2 className="size-5 animate-spin text-emerald-700" />
-          Checking your listing availability…
+      <main className="min-h-[60vh] flex-1 bg-[#faf9f6] px-4 py-10 sm:px-6">
+        <div role="status" aria-label="Checking listing availability" className="mx-auto max-w-2xl animate-pulse space-y-6">
+          <div className="space-y-3 text-center">
+            <div className="mx-auto h-8 w-56 rounded bg-stone-200 dark:bg-stone-800" />
+            <div className="mx-auto h-4 w-72 max-w-full rounded bg-stone-100 dark:bg-stone-800" />
+            <div className="mx-auto h-4 w-48 rounded bg-stone-100 dark:bg-stone-800" />
+          </div>
+          <div className="space-y-5 rounded-3xl border border-stone-200 bg-white p-6 dark:border-stone-700 dark:bg-stone-900 sm:p-8">
+            <div className="h-6 w-48 rounded bg-stone-200 dark:bg-stone-800" />
+            {Array.from({ length: 4 }, (_, index) => (
+              <div key={index} className="space-y-2">
+                <div className="h-4 w-24 rounded bg-stone-200 dark:bg-stone-800" />
+                <div className="h-11 rounded-xl bg-stone-100 dark:bg-stone-800" />
+              </div>
+            ))}
+          </div>
         </div>
       </main>
     );

@@ -20,6 +20,38 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 Property publishing requires a signed-in user and is limited to 3 listings per owner in a rolling 24-hour window. Photo uploads are limited to 10 batches per owner and 30 batches per IP per hour; each batch can contain at most 3 images.
 
+## Listing reports and administrator access
+
+Signed-in users can report a listing from its details. Reports are stored for review,
+limited to 5 submissions per account and 20 per IP per hour, and duplicate open reports
+from the same account for one listing are rejected. Accounts with the server-side
+profile role `admin` can use `/admin` to search/filter listings by city, property type,
+status and owner/listing text, review moderation history, restrict listings from public
+search with a required owner-visible reason, restore them, or permanently delete them.
+Permanent deletion requires a reason and typing `DELETE`; it removes listing images,
+saved links and reports while retaining a deletion audit record and an owner-visible
+notice in Account. The report queue is available at `/admin/reports`. API endpoints
+enforce the role independently of the page.
+
+Restriction is a reversible removal from public listings. The owner sees the reason
+and can edit the listing, but only an administrator can restore it. Permanent deletion
+is a separate destructive action; a limited audit snapshot and owner notice are retained
+even after the listing and its related records are deleted.
+
+Promote a trusted account using an administrative database connection, replacing the
+email with the account that should manage reports:
+
+```sql
+UPDATE profiles
+SET role = 'admin'
+WHERE lower(email) = lower('admin@example.com');
+```
+
+Do not add a user-facing role editor. New moderation tables and listing reason columns
+are created by the backend's startup schema initialization. On existing databases
+that use a PostgreSQL `property_status` enum, startup also adds the `removed` value
+required for listing restrictions.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More
