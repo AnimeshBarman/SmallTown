@@ -22,6 +22,10 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS address VARCHAR;"))
         conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS city VARCHAR;"))
         conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS contact_phone VARCHAR;"))
+        conn.execute(text(
+            "ALTER TABLE properties ADD COLUMN IF NOT EXISTS "
+            "contact_sharing_consent BOOLEAN NOT NULL DEFAULT FALSE;"
+        ))
         conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS moderation_reason TEXT;"))
         conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS moderated_at TIMESTAMPTZ;"))
         conn.execute(text(

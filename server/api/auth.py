@@ -28,7 +28,7 @@ from schemas.user_schema import (
 from dependencies import (verify_token, get_current_user)
 from security import (
     get_password_hash, verify_password, create_access_token, 
-    create_refresh_token, SECRET_KEY, ALGORITHM
+    create_refresh_token
 )
 from config import settings
 from rate_limiter import (
@@ -241,7 +241,11 @@ def google_login(request: GoogleLoginRequest, db: Session = Depends(get_db)):
 @router.post("/refresh", response_model=TokenResponse)
 def refresh_token(request: RefreshRequest, db: Session = Depends(get_db)):
     try:
-        payload = jwt.decode(request.refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(
+            request.refresh_token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
         user_id = payload.get("sub")
         token_type = payload.get("type")
         

@@ -21,6 +21,9 @@ UPLOAD_BATCH_WINDOW_SECONDS = 60 * 60
 LISTING_REPORT_LIMIT_PER_USER = 5
 LISTING_REPORT_LIMIT_PER_IP = 20
 LISTING_REPORT_WINDOW_SECONDS = 60 * 60
+CONTACT_REVEAL_LIMIT_PER_USER = 20
+CONTACT_REVEAL_LIMIT_PER_IP = 60
+CONTACT_REVEAL_WINDOW_SECONDS = 60 * 60
 
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
 LOGIN_FAILURES_PER_IP = 30
@@ -86,6 +89,27 @@ if ip_count == 1 then
     redis.call("EXPIRE", KEYS[2], ARGV[3])
 end
 return {owner_count, ip_count, 0}
+"""
+
+_CONTACT_REVEAL_LIMIT_SCRIPT = """
+local user_count = tonumber(redis.call("GET", KEYS[1]) or "0")
+local ip_count = tonumber(redis.call("GET", KEYS[2]) or "0")
+local user_ttl = redis.call("TTL", KEYS[1])
+local ip_ttl = redis.call("TTL", KEYS[2])
+
+if user_count >= tonumber(ARGV[1]) or ip_count >= tonumber(ARGV[2]) then
+    return {0, math.max(user_ttl, ip_ttl, 1)}
+end
+
+user_count = redis.call("INCR", KEYS[1])
+if user_count == 1 then
+    redis.call("EXPIRE", KEYS[1], ARGV[3])
+end
+ip_count = redis.call("INCR", KEYS[2])
+if ip_count == 1 then
+    redis.call("EXPIRE", KEYS[2], ARGV[3])
+end
+return {user_count, ip_count, 0}
 """
 
 _RECORD_LOGIN_FAILURE_SCRIPT = """
@@ -203,6 +227,34 @@ async def rate_limit_listing_report(request: Request, user_id: str) -> None:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many listing reports. Please try again later.",
             headers={"Retry-After": str(LISTING_REPORT_WINDOW_SECONDS)},
+        )
+
+
+async def rate_limit_contact_reveal(request: Request, user_id: str) -> None:
+    ip_hash = _digest(_client_ip(request))
+    user_hash = _digest(str(user_id))
+    try:
+        result = await redis_client.eval(
+            _CONTACT_REVEAL_LIMIT_SCRIPT,
+            2,
+            f"rate_limit:contact-reveal:user:{user_hash}",
+            f"rate_limit:contact-reveal:ip:{ip_hash}",
+            CONTACT_REVEAL_LIMIT_PER_USER,
+            CONTACT_REVEAL_LIMIT_PER_IP,
+            CONTACT_REVEAL_WINDOW_SECONDS,
+        )
+    except RedisError:
+        logger.exception("Redis contact-reveal rate limiting is unavailable.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Contact protection is temporarily unavailable. Please try again.",
+        ) from None
+
+    if int(result[0]) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="You have requested too many listing contacts. Please try again in an hour.",
+            headers={"Retry-After": str(max(1, int(result[1])))},
         )
 
 

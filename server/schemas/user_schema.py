@@ -28,9 +28,14 @@ class ProfileResponse(BaseModel):
     id: UUID
     fullname: str | None
     email: EmailStr
+    role: str
     phone: str | None
     avatar_url: str | None
     created_at: datetime
+    name_changes_limit: int
+    name_changes_used: int
+    name_changes_remaining: int
+    name_changes_reset_at: datetime
 
 
 class UserSignup(BaseModel):

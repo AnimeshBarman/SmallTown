@@ -129,6 +129,7 @@ class Property(Base):
     address: Mapped[str] = mapped_column(String, nullable=False)
     city: Mapped[str] = mapped_column(String, nullable=False)
     contact_phone: Mapped[str | None] = mapped_column(String, nullable=True)
+    contact_sharing_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     type: Mapped[str] = mapped_column(String, nullable=False)  # room, pg, flat
     price: Mapped[Decimal] = mapped_column(Numeric, nullable=False) 

@@ -38,7 +38,7 @@ async def ai_powered_search(
         normalized_query = " ".join(request.query.strip().lower().split())
         normalized_city = " ".join(city.strip().lower().split())
         query_digest = hashlib.sha256(normalized_query.encode("utf-8")).hexdigest()
-        cache_key = f"search_cache:v2:{normalized_city}:{limit}:{query_digest}"
+        cache_key = f"search_cache:v3:{normalized_city}:{limit}:{query_digest}"
 
         cached_result = await redis_client.get(cache_key)
         if cached_result:

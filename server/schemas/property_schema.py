@@ -20,6 +20,7 @@ class PropertyCreate(PropertyBase):
     latitude: float = Field(..., description="Map Latitude")
     longitude: float = Field(..., description="Map Longitude")
     contact_phone: str = Field(..., min_length=7, max_length=30)
+    contact_sharing_consent: Literal[True]
 
     @field_validator("contact_phone")
     @classmethod
@@ -43,6 +44,7 @@ class PropertyUpdate(BaseModel):
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     contact_phone: str | None = Field(default=None, min_length=7, max_length=30)
+    contact_sharing_consent: bool = False
 
     @field_validator("contact_phone")
     @classmethod
@@ -79,12 +81,17 @@ class PropertyResponse(PropertyBase):
 
 
 class PropertyDetailResponse(PropertyResponse):
-    contact_phone: Optional[str] = None
+    pass
+
+
+class PropertyContactResponse(BaseModel):
+    contact_phone: str | None
 
 
 class OwnerPropertyResponse(PropertyResponse):
     moderation_reason: str | None = None
     moderated_at: datetime | None = None
+    contact_sharing_consent: bool = False
 
 
 class OwnerPropertyDetailResponse(OwnerPropertyResponse):

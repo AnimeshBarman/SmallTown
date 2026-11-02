@@ -20,13 +20,14 @@ from schemas.property_schema import (
     PropertyCreate,
     PropertyDetailResponse,
     PropertyPageResponse,
+    PropertyContactResponse,
     PropertyResponse,
     PropertyUpdate,
     OwnerPropertyDetailResponse,
 )
 from schemas.moderation_schema import OwnerListingDeletionNoticeResponse
 from services.storage_service import (process_and_upload_image, delete_images_from_storage)
-from rate_limiter import rate_limit_image_upload
+from rate_limiter import rate_limit_contact_reveal, rate_limit_image_upload
 
 from dependencies import get_current_user
 from security import SECRET_KEY
@@ -99,13 +100,15 @@ def _property_rows(
     for property_record, latitude, longitude, owner_name in property_rows:
         row = {
             **PropertyResponse.model_validate(property_record).model_dump(),
-            "latitude": latitude,
-            "longitude": longitude,
+            "latitude": latitude if include_owner_moderation else round(latitude, 3) if latitude is not None else None,
+            "longitude": longitude if include_owner_moderation else round(longitude, 3) if longitude is not None else None,
+            "address": property_record.address if include_owner_moderation else None,
             "owner_name": owner_name,
         }
         if include_owner_moderation:
             row["moderation_reason"] = property_record.moderation_reason
             row["moderated_at"] = property_record.moderated_at
+            row["contact_sharing_consent"] = property_record.contact_sharing_consent
         rows.append(row)
     return rows
 
@@ -235,7 +238,6 @@ def get_property_detail(property_id: UUID, db: Session = Depends(get_db)):
             Property,
             func.ST_Y(cast(Property.coordinates, Geometry)).label("latitude"),
             func.ST_X(cast(Property.coordinates, Geometry)).label("longitude"),
-            Property.contact_phone,
             Profile.fullname.label("owner_name"),
         )
         .outerjoin(Profile, Profile.id == Property.owner_id)
@@ -245,13 +247,34 @@ def get_property_detail(property_id: UUID, db: Session = Depends(get_db)):
     if row is None:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    property_record, latitude, longitude, contact_phone, owner_name = row
+    property_record, latitude, longitude, owner_name = row
     return {
         **PropertyResponse.model_validate(property_record).model_dump(),
-        "latitude": latitude,
-        "longitude": longitude,
-        "contact_phone": contact_phone,
+        "latitude": round(latitude, 3) if latitude is not None else None,
+        "longitude": round(longitude, 3) if longitude is not None else None,
+        "address": None,
         "owner_name": owner_name,
+    }
+
+
+@router.get("/{property_id}/contact", response_model=PropertyContactResponse)
+async def reveal_property_contact(
+    property_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Profile = Depends(get_current_user),
+):
+    await rate_limit_contact_reveal(request, str(current_user.id))
+    property_record = db.query(Property).filter(
+        Property.id == property_id,
+        Property.status == "active",
+    ).first()
+    if property_record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Property not found.")
+    return {
+        "contact_phone": property_record.contact_phone
+        if property_record.contact_sharing_consent
+        else None
     }
 
 
@@ -274,10 +297,11 @@ def get_property_for_management(
     owner_name = db.query(Profile.fullname).filter(Profile.id == property_record.owner_id).scalar()
     return {
         **PropertyResponse.model_validate(property_record).model_dump(),
-        "latitude": coordinates.latitude,
-        "longitude": coordinates.longitude,
+        "latitude": coordinates.latitude if coordinates is not None else None,
+        "longitude": coordinates.longitude if coordinates is not None else None,
         "owner_name": owner_name,
         "contact_phone": property_record.contact_phone,
+        "contact_sharing_consent": property_record.contact_sharing_consent,
         "moderation_reason": property_record.moderation_reason,
         "moderated_at": property_record.moderated_at,
     }
@@ -342,6 +366,7 @@ def create_property(
             address=property_data.address,
             city=city.name,
             contact_phone=property_data.contact_phone,
+            contact_sharing_consent=property_data.contact_sharing_consent,
             description=property_data.description,
             type=property_data.type,
             price=property_data.price,
@@ -516,8 +541,9 @@ def count_property_view(
             viewed_on=viewed_on,
         )
         .on_conflict_do_nothing()
+        .returning(PropertyView.id)
     )
-    if result.rowcount:
+    if result.scalar_one_or_none() is not None:
         db.query(Property).filter(Property.id == property_id).update(
             {Property.view_count: Property.view_count + 1},
             synchronize_session=False,
