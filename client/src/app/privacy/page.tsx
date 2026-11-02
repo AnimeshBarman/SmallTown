@@ -17,7 +17,8 @@ export default function PrivacyPage() {
         <h2 className="text-xl font-semibold text-stone-950 dark:text-white">Information used</h2>
         <ul className="mt-3 list-disc space-y-2 pl-6">
           <li>Account details such as your name and email address, plus an avatar if provided through Google sign-in.</li>
-          <li>Listing details you submit, including property location, description, price, photos and a contact phone number.</li>
+          <li>Listing details you submit, including the exact property location, full address, description, price, photos and a contact phone number.</li>
+          <li>If you tap “Use my current location”, your browser requests a one-time device location to place the listing pin. SmallTown does not continuously track your device.</li>
           <li>Saved-property choices and basic listing-view counts used by the app.</li>
           <li>When you report a listing, the selected reason and any details you provide are associated with your account so an administrator can review the report.</li>
           <li>Search text when you use search features. Some natural-language searches may be processed by Groq to identify search criteria.</li>
@@ -26,9 +27,13 @@ export default function PrivacyPage() {
       <section>
         <h2 className="text-xl font-semibold text-stone-950 dark:text-white">What other users can see</h2>
         <p className="mt-3">
-          Property details and photos are shown to people browsing listings. Your listing
-          name and contact phone may be shown with a listing so people can contact you.
-          Do not include private information in a listing unless you intend to share it.
+          Browsers see only an approximate map pin rounded to about 100 metres; your exact
+          coordinates and full street address are not included in public listing responses.
+          Your contact phone is returned only when you opt in to sharing and a signed-in
+          user requests it; contact requests are rate-limited. Existing listings remain
+          private until their owner opts in through listing edit. Your public listing description and photos
+          can still reveal details, so do not include private information unless you
+          intend to share it.
         </p>
       </section>
       <section>

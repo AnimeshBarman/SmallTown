@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import PropertyPhotoViewer from "@/components/PropertyPhotoViewer";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   clearCreatedListing,
@@ -56,7 +57,7 @@ type PropertySummary = {
   created_at?: string;
 };
 
-type PropertyDetail = PropertySummary & { contact_phone?: string | null };
+type PropertyDetail = PropertySummary;
 type ListingReportReason = "suspicious" | "inaccurate" | "inappropriate" | "other";
 type City = { id: string; name: string; state?: string | null };
 type PropertyPage = { items: PropertySummary[]; total: number; limit: number; offset: number };
@@ -107,6 +108,10 @@ export default function ExplorePage() {
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState<ListingReportReason>("suspicious");
   const [reportDetails, setReportDetails] = useState("");
+  const [revealedContact, setRevealedContact] = useState<{
+    propertyId: string;
+    phone: string | null;
+  } | null>(null);
   const [photoSelection, setPhotoSelection] = useState<{ propertyId: string | null; index: number }>({
     propertyId: null,
     index: 0,
@@ -122,6 +127,7 @@ export default function ExplorePage() {
     x: 0,
     y: 0,
   });
+  const [photoViewerIndex, setPhotoViewerIndex] = useState<number | null>(null);
   const photoDragStart = useRef<{ pointerX: number; pointerY: number; panX: number; panY: number } | null>(null);
   const photoTouchStartX = useRef<number | null>(null);
   const createdPropertyId = useSyncExternalStore(
@@ -220,6 +226,16 @@ export default function ExplorePage() {
     },
   });
 
+  const contactRevealMutation = useMutation({
+    mutationFn: async (propertyId: string) => (
+      await api.get<{ contact_phone: string | null }>(`/properties/${propertyId}/contact`)
+    ).data,
+    onSuccess: (contact, propertyId) => {
+      setRevealedContact({ propertyId, phone: contact.contact_phone });
+    },
+  });
+  const resetContactRevealMutation = contactRevealMutation.reset;
+
   const reportMutation = useMutation({
     mutationFn: async (report: {
       propertyId: string;
@@ -237,20 +253,28 @@ export default function ExplorePage() {
 
   const resetReportMutation = reportMutation.reset;
   const closePropertyDetails = useCallback(() => {
+    setPhotoViewerIndex(null);
     setReportOpen(false);
     setReportDetails("");
     resetReportMutation();
+    resetContactRevealMutation();
+    setRevealedContact(null);
     setSelectedProperty(null);
-  }, [resetReportMutation]);
+  }, [resetContactRevealMutation, resetReportMutation]);
 
   useEffect(() => {
     if (!selectedId) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closePropertyDetails();
+      if (event.key !== "Escape") return;
+      if (photoViewerIndex !== null) {
+        setPhotoViewerIndex(null);
+      } else {
+        closePropertyDetails();
+      }
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [selectedId, closePropertyDetails]);
+  }, [selectedId, photoViewerIndex, closePropertyDetails]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -637,7 +661,17 @@ export default function ExplorePage() {
                       src={detailImages[activeImageIndex]}
                       alt={`${detail.title}, photo ${activeImageIndex + 1}`}
                       draggable={false}
-                      className={`h-full w-full object-contain transition-transform duration-200 ${activePhotoZoom > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Open photo ${activeImageIndex + 1} in full-screen viewer`}
+                      onClick={() => setPhotoViewerIndex(activeImageIndex)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setPhotoViewerIndex(activeImageIndex);
+                        }
+                      }}
+                      className={`h-full w-full cursor-zoom-in object-contain transition-transform duration-200 ${activePhotoZoom > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
                       style={{
                         transform: `translate(${activePhotoPan.x}px, ${activePhotoPan.y}px) scale(${activePhotoZoom})`,
                       }}
@@ -874,20 +908,51 @@ export default function ExplorePage() {
                       </>
                     )}
                   </div>
-                  {detail.contact_phone ? (
-                    <a href={`tel:${detail.contact_phone}`} className="mt-5 flex h-12 items-center justify-center gap-2 rounded-full bg-emerald-700 font-semibold text-white transition hover:bg-emerald-800">
-                      <Phone size={17} /> Call owner · {detail.contact_phone}
+                  {revealedContact?.propertyId === selectedId && revealedContact.phone ? (
+                    <a href={`tel:${revealedContact.phone}`} className="mt-5 flex h-12 items-center justify-center gap-2 rounded-full bg-emerald-700 font-semibold text-white transition hover:bg-emerald-800">
+                      <Phone size={17} /> Call owner · {revealedContact.phone}
                     </a>
-                  ) : detailQuery.isFetching && detail.contact_phone === undefined ? (
-                    <p role="status" className="mt-5 h-12 animate-pulse rounded-2xl bg-stone-100 dark:bg-stone-800" />
+                  ) : revealedContact?.propertyId === selectedId ? (
+                    <p className="mt-5 rounded-2xl bg-amber-50 p-3 text-sm text-amber-900">The owner has not shared a contact number for this listing.</p>
+                  ) : signedIn ? (
+                    <Button
+                      type="button"
+                      disabled={contactRevealMutation.isPending}
+                      onClick={() => contactRevealMutation.mutate(selectedId)}
+                      className="mt-5 h-12 w-full rounded-full bg-emerald-700 font-semibold text-white transition hover:bg-emerald-800"
+                    >
+                      {contactRevealMutation.isPending
+                        ? <Loader2 className="animate-spin" size={17} />
+                        : <Phone size={17} />}
+                      {contactRevealMutation.isPending ? "Getting contact…" : "Show owner contact"}
+                    </Button>
                   ) : (
-                    <p className="mt-5 rounded-2xl bg-amber-50 p-3 text-sm text-amber-900">The owner has not added a contact number yet.</p>
+                    <Button
+                      type="button"
+                      onClick={() => router.push(`/login?next=${encodeURIComponent(`/explore?property=${selectedId}`)}`)}
+                      className="mt-5 h-12 w-full rounded-full bg-emerald-700 font-semibold text-white transition hover:bg-emerald-800"
+                    >
+                      Sign in to request contact
+                    </Button>
+                  )}
+                  {contactRevealMutation.isError && (
+                    <p role="alert" className="mt-2 text-sm text-red-700">
+                      {getSearchErrorMessage(contactRevealMutation.error)}
+                    </p>
                   )}
                 </div>
               </>
             ) : null}
           </Card>
         </div>
+      )}
+      {photoViewerIndex !== null && detailImages[photoViewerIndex] && detail && (
+        <PropertyPhotoViewer
+          images={detailImages}
+          title={detail.title}
+          initialIndex={photoViewerIndex}
+          onClose={() => setPhotoViewerIndex(null)}
+        />
       )}
     </main>
   );

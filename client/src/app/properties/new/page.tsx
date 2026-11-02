@@ -16,7 +16,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Upload, ArrowRight, ArrowLeft, CheckCircle2, AlertCircle, X, MapPin, Clock3 } from "lucide-react";
+import { Loader2, Upload, ArrowRight, ArrowLeft, CheckCircle2, AlertCircle, X, MapPin, Clock3, LocateFixed } from "lucide-react";
+import { getCurrentCoordinates } from "@/lib/geolocation";
 
 const PropertyMap = dynamic(() => import("@/components/PropertyMap"), { ssr: false });
 
@@ -83,6 +84,9 @@ export default function CreatePropertyPage() {
   const [step, setStep] = useState(1);
   const [selectedCoordinates, setSelectedCoordinates] = useState<[number, number]>([26.323, 89.451]);
   const [selectedCityName, setSelectedCityName] = useState("Cooch Behar");
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const [locationError, setLocationError] = useState("");
+  const [contactSharingConsent, setContactSharingConsent] = useState(false);
   
   // File & Upload States
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -133,6 +137,21 @@ export default function CreatePropertyPage() {
   ];
   const coochBeharBounds: [[number, number], [number, number]] | undefined =
     selectedCityName === "Cooch Behar" ? COOCH_BEHAR_BOUNDS : undefined;
+
+  const handleUseCurrentLocation = async () => {
+    setLocationError("");
+    setIsGettingLocation(true);
+    try {
+      const location = await getCurrentCoordinates();
+      setSelectedCoordinates(location);
+      setValue("latitude", location[0], { shouldValidate: true });
+      setValue("longitude", location[1], { shouldValidate: true });
+    } catch (error: unknown) {
+      setLocationError(error instanceof Error ? error.message : "Could not read your location.");
+    } finally {
+      setIsGettingLocation(false);
+    }
+  };
 
   // Handle local file selection with 9MB guardrail
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -236,6 +255,7 @@ export default function CreatePropertyPage() {
     const payload = {
       ...data,
       image_urls: uploadedImageUrls, // Contains array of up to 3 Supabase URLs
+      contact_sharing_consent: true,
     };
 
     try {
@@ -259,6 +279,8 @@ export default function CreatePropertyPage() {
     setStep(1);
     setSelectedCoordinates([26.323, 89.451]);
     setSelectedCityName("Cooch Behar");
+    setContactSharingConsent(false);
+    setLocationError("");
     setSelectedFiles([]);
     setPreviewUrls([]);
     setUploadedImageUrls([]);
@@ -439,6 +461,10 @@ export default function CreatePropertyPage() {
           {step === 1 && (
             <form onSubmit={handleSubmit(async () => {
               const isValid = await trigger();
+              if (!contactSharingConsent) {
+                setErrorMessage("Confirm that you agree to share this contact number with signed-in users.");
+                return;
+              }
               if (isValid) setStep(2);
             })}>
               <CardHeader>
@@ -516,7 +542,7 @@ export default function CreatePropertyPage() {
                 </div>
 
                 <div>
-                  <Label htmlFor="address">Full address</Label>
+                  <Label htmlFor="address">Full address (kept private)</Label>
                   <Input id="address" placeholder="House, street, landmark" {...register("address")} className="mt-1" />
                   {errors.address && <p className="mt-1 text-xs text-red-500">{errors.address.message}</p>}
                 </div>
@@ -524,18 +550,42 @@ export default function CreatePropertyPage() {
                 <div>
                   <Label htmlFor="contact_phone">Contact number for this listing</Label>
                   <Input id="contact_phone" type="tel" inputMode="tel" autoComplete="tel" placeholder="+91 98765 43210" {...register("contact_phone")} className="mt-1 h-11" />
-                  <p className="mt-1 text-xs text-stone-500">Shown to people who open your listing. This is separate from your profile.</p>
+                  <p className="mt-1 text-xs text-stone-500">This is separate from your profile and is only shared with signed-in users who request it. Contact requests are rate-limited.</p>
                   {errors.contact_phone && <p className="mt-1 text-xs text-red-500">{errors.contact_phone.message}</p>}
+                  <label className="mt-2 flex items-start gap-2 text-sm leading-5 text-stone-700">
+                    <input
+                      type="checkbox"
+                      checked={contactSharingConsent}
+                      onChange={(event) => {
+                        setContactSharingConsent(event.target.checked);
+                        setErrorMessage("");
+                      }}
+                      className="mt-1 size-4 accent-emerald-700"
+                    />
+                    <span>I agree to share this number with signed-in SmallTown users who request it.</span>
+                  </label>
                 </div>
 
                 <div className="space-y-2">
                   <div>
                     <Label>Pin the location</Label>
-                    <p className="mt-1 flex items-center gap-1 text-xs text-gray-500"><MapPin className="h-3.5 w-3.5" />Tap to place or move the pin in the approximate Cooch Behar district area.</p>
+                    <p className="mt-1 flex items-center gap-1 text-xs text-gray-500"><MapPin className="h-3.5 w-3.5" />Your exact pin is kept private. The public map shows an approximate location rounded to about 100 metres.</p>
                   </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isGettingLocation}
+                    onClick={() => void handleUseCurrentLocation()}
+                    className="h-10 w-full rounded-xl sm:w-auto"
+                  >
+                    {isGettingLocation ? <Loader2 className="animate-spin" size={16} /> : <LocateFixed size={16} />}
+                    {isGettingLocation ? "Getting your location…" : "Use my current location"}
+                  </Button>
+                  {locationError && <p role="alert" className="text-sm text-red-700">{locationError}</p>}
                   <PropertyMap
                     properties={[]}
                     selectable
+                    focusSelectedLocation
                     center={mapCenter}
                     bounds={coochBeharBounds}
                     selectedLocation={selectedCoordinates}
@@ -545,6 +595,9 @@ export default function CreatePropertyPage() {
                       setValue("longitude", location[1], { shouldValidate: true });
                     }}
                   />
+                  <p className="text-xs leading-5 text-stone-500">
+                    Location is requested only when you tap the button. Review or move the pin before publishing. Your full address is not shown on the public map; avoid adding private details to your description.
+                  </p>
                 </div>
 
                 <div>

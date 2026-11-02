@@ -52,6 +52,20 @@ are created by the backend's startup schema initialization. On existing database
 that use a PostgreSQL `property_status` enum, startup also adds the `removed` value
 required for listing restrictions.
 
+## Location and contact privacy
+
+The listing form can request device location only after the user taps the location
+button. Exact coordinates and the full address remain private to the owner and
+administrators; public listings and maps receive coordinates rounded to 0.001 degrees
+(roughly 100 metres) and no full street address. Device geolocation requires HTTPS
+outside localhost.
+
+Contact numbers are returned only through an authenticated, rate-limited reveal
+endpoint after the listing owner explicitly opts in. New listings require that opt-in.
+Existing listings default to not shared after the schema update; owners can enable or
+withdraw sharing from the listing edit form. Contact reveals are capped at 20 per
+account and 60 per IP per hour.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More

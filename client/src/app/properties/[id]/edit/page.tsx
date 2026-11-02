@@ -8,8 +8,9 @@ import { isAxiosError } from "axios";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { ArrowLeft, Loader2, MapPin } from "lucide-react";
+import { ArrowLeft, Loader2, MapPin, LocateFixed } from "lucide-react";
 import { api } from "@/lib/api";
+import { getCurrentCoordinates } from "@/lib/geolocation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -29,6 +30,7 @@ const editSchema = z.object({
   type: z.enum(["room", "pg", "flat"]),
   price: z.coerce.number().positive(),
   contact_phone: z.string().trim().min(7).max(30).regex(/^[+0-9()\-\s]+$/),
+  contact_sharing_consent: z.boolean(),
 });
 
 type EditFormInput = z.input<typeof editSchema>;
@@ -95,6 +97,8 @@ function EditPropertyForm() {
   const queryClient = useQueryClient();
   const [coordinates, setCoordinates] = useState<[number, number] | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [locationError, setLocationError] = useState("");
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
 
   const propertyQuery = useQuery<PropertyDetail>({
     queryKey: ["property-management", id],
@@ -118,6 +122,7 @@ function EditPropertyForm() {
       type: "room",
       price: 1,
       contact_phone: "",
+      contact_sharing_consent: false,
     },
   });
   const selectedCityName = useWatch({ control: form.control, name: "city" });
@@ -141,6 +146,7 @@ function EditPropertyForm() {
       type: property.type,
       price: Number(property.price),
       contact_phone: property.contact_phone || "",
+      contact_sharing_consent: property.contact_sharing_consent,
     });
   }, [propertyQuery.data, form]);
 
@@ -149,6 +155,18 @@ function EditPropertyForm() {
       ? [propertyQuery.data.latitude, propertyQuery.data.longitude]
       : null;
   const selectedLocation = coordinates ?? propertyCoordinates ?? mapCenter;
+
+  const handleUseCurrentLocation = async () => {
+    setLocationError("");
+    setIsGettingLocation(true);
+    try {
+      setCoordinates(await getCurrentCoordinates());
+    } catch (error: unknown) {
+      setLocationError(error instanceof Error ? error.message : "Could not read your location.");
+    } finally {
+      setIsGettingLocation(false);
+    }
+  };
 
   const updateMutation = useMutation({
     mutationFn: async (values: EditForm) => api.patch(`/properties/${id}`, {
@@ -260,12 +278,20 @@ function EditPropertyForm() {
                 </div>
               </div>
               <div>
-                <Label htmlFor="address">Full address</Label>
+                <Label htmlFor="address">Full address (kept private)</Label>
                 <Input id="address" {...form.register("address")} className="mt-1 h-11" />
               </div>
               <div>
                 <Label htmlFor="contact_phone">Contact number</Label>
                 <Input id="contact_phone" type="tel" inputMode="tel" {...form.register("contact_phone")} className="mt-1 h-11" />
+                <label className="mt-2 flex items-start gap-2 text-sm leading-5 text-stone-700 dark:text-stone-300">
+                  <input
+                    type="checkbox"
+                    {...form.register("contact_sharing_consent")}
+                    className="mt-1 size-4 accent-emerald-700"
+                  />
+                  <span>Share this number with signed-in users who request it. Contact requests are rate-limited.</span>
+                </label>
               </div>
               <div>
                 <Label htmlFor="description">Description</Label>
@@ -274,17 +300,32 @@ function EditPropertyForm() {
               <div className="space-y-2">
                 <div>
                   <Label>Map location</Label>
-                  <p className="mt-1 flex items-center gap-1 text-xs text-stone-500"><MapPin size={14} />Tap the map to move the location pin.</p>
+                  <p className="mt-1 flex items-center gap-1 text-xs text-stone-500"><MapPin size={14} />The exact pin is private; the public map shows an approximate location rounded to about 100 metres.</p>
                 </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isGettingLocation}
+                  onClick={() => void handleUseCurrentLocation()}
+                  className="h-10 w-full rounded-xl sm:w-auto"
+                >
+                  {isGettingLocation ? <Loader2 className="animate-spin" size={16} /> : <LocateFixed size={16} />}
+                  {isGettingLocation ? "Getting your location…" : "Use my current location"}
+                </Button>
+                {locationError && <p role="alert" className="text-sm text-red-700">{locationError}</p>}
                 <PropertyMap
                   key={selectedCityName}
                   properties={[]}
                   selectable
+                  focusSelectedLocation
                   center={mapCenter}
                   bounds={bounds}
                   selectedLocation={selectedLocation}
                   onLocationSelect={setCoordinates}
                 />
+                <p className="text-xs leading-5 text-stone-500">
+                  Location is requested only when you tap the button. Review or move the pin before saving. Your full address is not shown on the public map.
+                </p>
               </div>
               {propertyQuery.data.image_urls?.length ? (
                 <p className="text-xs text-stone-500">Existing photos are kept when you save edits.</p>

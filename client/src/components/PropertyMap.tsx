@@ -28,6 +28,7 @@ interface PropertyMapProps {
   center?: [number, number];
   selectable?: boolean;
   selectedLocation?: [number, number] | null;
+  focusSelectedLocation?: boolean;
   bounds?: [[number, number], [number, number]];
   className?: string;
   onLocationSelect?: (location: [number, number]) => void;
@@ -39,6 +40,7 @@ export default function PropertyMap({
   center = [26.323, 89.451],
   selectable = false,
   selectedLocation = null,
+  focusSelectedLocation = false,
   bounds,
   className = "h-96",
   onLocationSelect,
@@ -51,6 +53,8 @@ export default function PropertyMap({
   const propertySelectRef = useRef(onPropertySelect);
   const initialMapConfig = useRef({ center, selectable, bounds });
   const [centerLatitude, centerLongitude] = center;
+  const selectedLatitude = selectedLocation?.[0];
+  const selectedLongitude = selectedLocation?.[1];
 
   useEffect(() => {
     initialMapConfig.current = {
@@ -107,6 +111,22 @@ export default function PropertyMap({
     map.setMaxBounds(selectable ? bounds : undefined);
     map.invalidateSize();
   }, [centerLatitude, centerLongitude, bounds, selectable]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (
+      !map ||
+      !selectable ||
+      !focusSelectedLocation ||
+      selectedLatitude === undefined ||
+      selectedLongitude === undefined
+    ) return;
+    map.flyTo(
+      [selectedLatitude, selectedLongitude],
+      Math.max(map.getZoom(), 15),
+      { duration: 0.5 },
+    );
+  }, [focusSelectedLocation, selectable, selectedLatitude, selectedLongitude]);
 
   useEffect(() => {
     const markerLayer = markerLayerRef.current;
