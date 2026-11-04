@@ -13,6 +13,7 @@ const footerGroups = [
     title: "Support",
     links: [
       { href: "/help", label: "Help & contact" },
+      { href: "/feedback", label: "Share feedback" },
       { href: "/safety", label: "Rental safety tips" },
     ],
   },

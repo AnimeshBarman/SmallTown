@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 import { isAxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Building2, Loader2, Search, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, Loader2, MessageSquareText, Search, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { getAuthSnapshot, getServerAuthSnapshot, subscribeToAuth } from "@/lib/auth-state";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 24;
 
 type ListingType = "room" | "pg" | "flat";
 type ListingStatus = "active" | "removed" | "all";
@@ -54,6 +54,13 @@ type ListingDeletionNotice = {
   reason: string;
   deleted_at: string;
   moderation_history: ModerationAction[];
+};
+type AdminFeedback = {
+  id: string;
+  category: "bug" | "idea" | "general";
+  message: string;
+  email: string | null;
+  created_at: string;
 };
 
 function getErrorMessage(error: unknown) {
@@ -120,6 +127,12 @@ export default function AdminPage() {
     queryKey: ["admin", "deletions"],
     enabled: showDeletionHistory && signedIn && profileQuery.data?.role === "admin",
     queryFn: async () => (await api.get<ListingDeletionNotice[]>("/moderation/deletions")).data,
+  });
+  const feedbackQuery = useQuery<AdminFeedback[]>({
+    queryKey: ["admin", "feedback"],
+    enabled: signedIn && profileQuery.data?.role === "admin",
+    queryFn: async () => (await api.get<AdminFeedback[]>("/feedback/", { params: { limit: 50 } })).data,
+    staleTime: 30 * 1000,
   });
 
   const moderationMutation = useMutation({
@@ -336,6 +349,49 @@ export default function AdminPage() {
             Couldn&apos;t permanently delete the listing: {getErrorMessage(deletionMutation.error)}
           </p>
         )}
+
+        <section aria-labelledby="feedback-heading" className="mt-6 rounded-3xl border border-stone-200 bg-white p-5 shadow-sm dark:border-stone-700 dark:bg-stone-950 sm:p-6">
+          <div className="flex items-center gap-3">
+            <span className="flex size-10 items-center justify-center rounded-full bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+              <MessageSquareText size={18} />
+            </span>
+            <div>
+              <h2 id="feedback-heading" className="font-semibold">Recent app feedback</h2>
+              <p className="text-sm text-stone-500">The latest feedback submitted by users</p>
+            </div>
+          </div>
+          {feedbackQuery.isLoading ? (
+            <p role="status" className="mt-4 text-sm text-stone-500">Loading feedback…</p>
+          ) : feedbackQuery.isError ? (
+            <p role="alert" className="mt-4 text-sm text-red-700">
+              Couldn&apos;t load feedback: {getErrorMessage(feedbackQuery.error)}{" "}
+              <button type="button" className="font-semibold underline" onClick={() => void feedbackQuery.refetch()}>Try again</button>
+            </p>
+          ) : feedbackQuery.data?.length ? (
+            <ul className="mt-4 divide-y divide-stone-200 dark:divide-stone-800">
+              {feedbackQuery.data.map((feedback) => (
+                <li key={feedback.id} className="py-4 first:pt-0 last:pb-0">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-semibold capitalize text-stone-700 dark:bg-stone-800 dark:text-stone-200">
+                      {feedback.category === "bug" ? "Issue" : feedback.category === "idea" ? "Feature idea" : "General"}
+                    </span>
+                    <time className="text-xs text-stone-500" dateTime={feedback.created_at}>
+                      {new Date(feedback.created_at).toLocaleString()}
+                    </time>
+                  </div>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-stone-800 dark:text-stone-200">{feedback.message}</p>
+                  {feedback.email && (
+                    <a href={`mailto:${feedback.email}`} className="mt-2 inline-block text-sm font-medium text-emerald-800 underline dark:text-emerald-300">
+                      Reply to {feedback.email}
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-4 text-sm text-stone-500">No feedback has been submitted yet.</p>
+          )}
+        </section>
 
         {showDeletionHistory && (
           <section aria-label="Permanently deleted listings" className="mt-5 rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-950">

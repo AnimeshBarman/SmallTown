@@ -6,10 +6,11 @@ import { isAxiosError } from "axios";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
-  ArrowLeft, ArrowRight, BedDouble, ChevronLeft, ChevronRight, Flag, Heart, Loader2, MapPin, Phone, Search, ShieldCheck, Sparkles, X,
+  ArrowLeft, ArrowRight, BedDouble, ChevronLeft, ChevronRight, Flag, Heart, Loader2, LocateFixed, MapPin, Phone, Search, ShieldCheck, Sparkles, X,
   ZoomIn, ZoomOut,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { getCurrentCoordinates } from "@/lib/geolocation";
 import { formatPostedAgo } from "@/lib/relative-time";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -166,7 +167,8 @@ export default function ExplorePage() {
       return data;
     },
     retry: false,
-    staleTime: 30 * 1000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     placeholderData: keepPreviousData,
   });
   const properties = propertiesQuery.data?.items ?? [];
@@ -181,17 +183,34 @@ export default function ExplorePage() {
       return data;
     },
   });
-  const displayedProperties = searchMutation.isSuccess
-    ? searchMutation.data
-    : properties;
-  const sortedDisplayedProperties = searchMutation.isSuccess
-    ? [...displayedProperties].sort((a, b) => {
-        if (sort === "price_asc") return Number(a.price) - Number(b.price);
-        const dateDifference =
-          new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime();
-        return sort === "oldest" ? dateDifference : -dateDifference;
-      })
-    : displayedProperties;
+  const nearbySearchMutation = useMutation({
+    mutationFn: async () => {
+      const [latitude, longitude] = await getCurrentCoordinates();
+      const { data } = await api.post<PropertySummary[]>("/search/nearby", {
+        latitude,
+        longitude,
+      }, {
+        params: { limit: 24 },
+        timeout: 10000,
+      });
+      return data;
+    },
+  });
+  const displayedProperties = nearbySearchMutation.isSuccess
+    ? nearbySearchMutation.data
+    : searchMutation.isSuccess
+      ? searchMutation.data
+      : properties;
+  const sortedDisplayedProperties = nearbySearchMutation.isSuccess
+    ? displayedProperties
+    : searchMutation.isSuccess
+      ? [...displayedProperties].sort((a, b) => {
+          if (sort === "price_asc") return Number(a.price) - Number(b.price);
+          const dateDifference =
+            new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime();
+          return sort === "oldest" ? dateDifference : -dateDifference;
+        })
+      : displayedProperties;
 
   const detailQuery = useQuery<PropertyDetail>({
     queryKey: ["property", selectedId],
@@ -358,6 +377,7 @@ export default function ExplorePage() {
               setCity(value);
               setPage(0);
               searchMutation.reset();
+              nearbySearchMutation.reset();
             }}>
               <SelectTrigger id="explore-city" aria-label="Choose a city" className="h-10 w-full rounded-xl border-stone-200 bg-stone-50 px-3 font-semibold shadow-none focus-visible:ring-2 focus-visible:ring-emerald-600">
                 <SelectValue placeholder="Choose a city" />
@@ -372,51 +392,71 @@ export default function ExplorePage() {
         </div>
 
         <Card className="mb-4 rounded-2xl border-emerald-100 bg-linear-to-r from-emerald-50 via-white to-lime-50 p-2.5 shadow-sm dark:border-stone-700 dark:bg-none dark:bg-stone-900 sm:p-3">
-          <form
-            className="flex gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const query = searchText.trim();
-              if (query.length < 5) return;
-              searchMutation.mutate(query);
-            }}
-          >
-            <div className="relative min-w-0 flex-1">
-              <Sparkles className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-700" />
-              <Input
-                value={searchText}
-                onChange={(event) => {
-                  setSearchText(event.target.value);
-                  if (searchMutation.isSuccess || searchMutation.isError) searchMutation.reset();
-                }}
-                aria-label="Describe the place you want"
-                placeholder="Try “PG under ₹8,000 near college”"
-                minLength={5}
-                maxLength={200}
-                className="h-10 rounded-xl border-emerald-100 bg-white pl-9 text-sm text-stone-900 placeholder:text-stone-400 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100 dark:placeholder:text-stone-500 sm:text-base"
-              />
-            </div>
-            <Button
-              type="submit"
-              disabled={searchMutation.isPending || searchText.trim().length < 5}
-              className="h-10 shrink-0 rounded-xl bg-emerald-700 px-3 text-white hover:bg-emerald-800 sm:px-4"
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <form
+              className="flex min-w-0 flex-1 gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const query = searchText.trim();
+                if (query.length < 5) return;
+                nearbySearchMutation.reset();
+                searchMutation.mutate(query);
+              }}
             >
-              {searchMutation.isPending ? <Loader2 className="animate-spin" /> : <Search />}
-              <span className="hidden sm:inline">{searchMutation.isPending ? "Searching…" : "AI search"}</span>
-              <span className="sr-only sm:hidden">{searchMutation.isPending ? "Searching" : "AI search"}</span>
-            </Button>
-            {searchMutation.isSuccess && (
+              <div className="relative min-w-0 flex-1">
+                <Sparkles className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-700" />
+                <Input
+                  value={searchText}
+                  onChange={(event) => {
+                    setSearchText(event.target.value);
+                    if (searchMutation.isSuccess || searchMutation.isError) searchMutation.reset();
+                    if (nearbySearchMutation.isSuccess || nearbySearchMutation.isError) nearbySearchMutation.reset();
+                  }}
+                  aria-label="Describe the place you want"
+                  placeholder="Try “PG under ₹8,000 near college”"
+                  minLength={5}
+                  maxLength={200}
+                  className="h-10 rounded-xl border-emerald-100 bg-white pl-9 text-sm text-stone-900 placeholder:text-stone-400 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100 dark:placeholder:text-stone-500 sm:text-base"
+                />
+              </div>
               <Button
-                type="button"
-                variant="outline"
-                onClick={() => searchMutation.reset()}
-                className="h-10 rounded-xl border-stone-300 bg-white px-3 text-stone-800 hover:bg-stone-100 hover:text-stone-950 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100 dark:hover:bg-stone-700 dark:hover:text-white"
+                type="submit"
+                disabled={searchMutation.isPending || searchText.trim().length < 5}
+                className="h-10 shrink-0 rounded-xl bg-emerald-700 px-3 text-white hover:bg-emerald-800 sm:px-4"
               >
-                <span className="hidden sm:inline">Clear</span>
-                <X className="size-4 sm:hidden" />
+                {searchMutation.isPending ? <Loader2 className="animate-spin" /> : <Search />}
+                <span className="hidden sm:inline">{searchMutation.isPending ? "Searching…" : "AI search"}</span>
+                <span className="sr-only sm:hidden">{searchMutation.isPending ? "Searching" : "AI search"}</span>
               </Button>
-            )}
-          </form>
+              {searchMutation.isSuccess && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    searchMutation.reset();
+                    nearbySearchMutation.reset();
+                  }}
+                  className="h-10 rounded-xl border-stone-300 bg-white px-3 text-stone-800 hover:bg-stone-100 hover:text-stone-950 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100 dark:hover:bg-stone-700 dark:hover:text-white"
+                >
+                  <span className="hidden sm:inline">Clear</span>
+                  <X className="size-4 sm:hidden" />
+                </Button>
+              )}
+            </form>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={nearbySearchMutation.isPending || searchMutation.isPending}
+              onClick={() => {
+                searchMutation.reset();
+                nearbySearchMutation.mutate();
+              }}
+              className="h-10 w-full shrink-0 rounded-xl border-emerald-200 bg-white px-3 text-emerald-800 hover:bg-emerald-50 sm:w-auto sm:px-4"
+            >
+              {nearbySearchMutation.isPending ? <Loader2 className="animate-spin" /> : <LocateFixed />}
+              <span>{nearbySearchMutation.isPending ? "Finding nearby…" : "Rooms Near Me"}</span>
+            </Button>
+          </div>
           <p className="mt-1 hidden text-xs text-stone-600 sm:block">Search naturally by room type, rent, or nearby landmark.</p>
           {searchText.trim().length > 0 && searchText.trim().length < 5 && (
             <p className="mt-2 text-xs text-amber-800">Enter at least 5 characters to search.</p>
@@ -429,6 +469,23 @@ export default function ExplorePage() {
           {searchMutation.isSuccess && (
             <p role="status" className="mt-2 text-xs text-emerald-800">
               {searchMutation.data.length} {searchMutation.data.length === 1 ? "place" : "places"} found for “{searchMutation.variables}”.
+            </p>
+          )}
+          {nearbySearchMutation.isError && (
+            <p role="alert" className="mt-2 text-sm text-red-700">
+              {getSearchErrorMessage(nearbySearchMutation.error)}
+            </p>
+          )}
+          {nearbySearchMutation.isSuccess && (
+            <p role="status" className="mt-2 text-xs text-emerald-800">
+              {nearbySearchMutation.data.length} {nearbySearchMutation.data.length === 1 ? "place" : "places"} found within 2 km of you.
+              <button
+                type="button"
+                onClick={() => nearbySearchMutation.reset()}
+                className="ml-2 font-semibold underline"
+              >
+                Clear
+              </button>
             </p>
           )}
         </Card>
@@ -456,14 +513,18 @@ export default function ExplorePage() {
 
         <div className="mb-3 flex items-center justify-between gap-3">
           <p className="text-sm text-stone-600">
-            {searchMutation.isSuccess
+            {nearbySearchMutation.isSuccess
+              ? `${sortedDisplayedProperties.length} places within 2 km`
+              : searchMutation.isSuccess
               ? `${sortedDisplayedProperties.length} search results`
               : `${propertiesQuery.data?.total ?? 0} places`}
             {propertiesQuery.isFetching && propertiesQuery.isPlaceholderData ? (
               <span className="ml-2 text-xs text-emerald-700">Updating…</span>
             ) : null}
           </p>
-          <Select value={sort} onValueChange={(value) => {
+          {nearbySearchMutation.isSuccess ? (
+            <span className="text-sm font-medium text-stone-600">Nearest first</span>
+          ) : <Select value={sort} onValueChange={(value) => {
             if (value === "newest" || value === "oldest" || value === "price_asc") {
               setSort(value);
               setPage(0);
@@ -477,10 +538,10 @@ export default function ExplorePage() {
               <SelectItem value="oldest">Oldest first</SelectItem>
               <SelectItem value="price_asc">Price: low to high</SelectItem>
             </SelectContent>
-          </Select>
+          </Select>}
         </div>
 
-        {propertiesQuery.isLoading ? (
+        {propertiesQuery.isLoading && !searchMutation.isSuccess && !nearbySearchMutation.isSuccess ? (
           <div className="grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]" role="status" aria-label="Loading nearby places">
             <div className="min-w-0 space-y-4">
               {Array.from({ length: 3 }, (_, index) => (
@@ -499,7 +560,7 @@ export default function ExplorePage() {
               <div className="h-96 animate-pulse rounded-3xl border border-stone-200 bg-stone-100 dark:border-stone-700 dark:bg-stone-900" />
             </div>
           </div>
-        ) : propertiesQuery.isError ? (
+        ) : propertiesQuery.isError && !searchMutation.isSuccess && !nearbySearchMutation.isSuccess ? (
           <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
             We couldn&apos;t load local listings. Check your connection, then try again.
             <button onClick={() => void propertiesQuery.refetch()} className="ml-2 font-semibold underline">Retry</button>
@@ -544,14 +605,22 @@ export default function ExplorePage() {
                 <div className="rounded-3xl border border-dashed border-stone-300 bg-white px-6 py-12 text-center">
                   <BedDouble className="mx-auto text-stone-400" size={32} />
                   <h2 className="mt-3 font-semibold">
-                    {searchMutation.isSuccess ? "No matching places found" : "No places listed here yet"}
+                    {nearbySearchMutation.isSuccess
+                      ? "No places found nearby"
+                      : searchMutation.isSuccess
+                        ? "No matching places found"
+                        : "No places listed here yet"}
                   </h2>
                   <p className="mt-1 text-sm text-stone-500">
-                    {searchMutation.isSuccess ? "Try a broader search, another rent range, or a different landmark." : `Be the first to share a place in ${city}.`}
+                    {nearbySearchMutation.isSuccess
+                      ? "There are no active listings within 2 km of your current location."
+                      : searchMutation.isSuccess
+                        ? "Try a broader search, another rent range, or a different landmark."
+                        : `Be the first to share a place in ${city}.`}
                   </p>
                 </div>
               )}
-              {!searchMutation.isSuccess && totalPages > 1 && (
+              {!searchMutation.isSuccess && !nearbySearchMutation.isSuccess && totalPages > 1 && (
                 <div className="flex items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-white p-3">
                   <Button type="button" variant="outline" disabled={page === 0 || propertiesQuery.isFetching} onClick={() => setPage((current) => Math.max(0, current - 1))} className="h-10 rounded-xl">
                     <ArrowLeft /> <span className="hidden sm:inline">Previous</span>

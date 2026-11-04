@@ -4,7 +4,9 @@ import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { GoogleOAuthProvider, GoogleLogin, type CredentialResponse } from "@react-oauth/google";
 import { isAxiosError } from "axios";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { clearPrivateQueryCache } from "@/lib/private-query-cache";
 import {
   getLogoutWarningSnapshot,
   getServerLogoutWarningSnapshot,
@@ -30,6 +32,7 @@ function getErrorMessage(error: unknown) {
 
 export default function LoginPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -41,6 +44,7 @@ export default function LoginPage() {
   const isAuthenticating = useRef(false);
 
   const finishLogin = useCallback((tokens: AuthResponse) => {
+    clearPrivateQueryCache(queryClient);
     localStorage.setItem("access_token", tokens.access_token);
     localStorage.setItem("refresh_token", tokens.refresh_token);
     notifyAuthChanged();
@@ -50,7 +54,7 @@ export default function LoginPage() {
       ? returnTo
       : "/explore";
     router.push(safeReturnTo);
-  }, [router]);
+  }, [queryClient, router]);
 
   const handleManualSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

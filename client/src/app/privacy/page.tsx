@@ -21,6 +21,7 @@ export default function PrivacyPage() {
           <li>If you tap “Use my current location”, your browser requests a one-time device location to place the listing pin. SmallTown does not continuously track your device.</li>
           <li>Saved-property choices and basic listing-view counts used by the app.</li>
           <li>When you report a listing, the selected reason and any details you provide are associated with your account so an administrator can review the report.</li>
+          <li>Feedback you submit, including its category and message, plus your optional email if you provide one, is stored so SmallTown can review suggestions and follow up.</li>
           <li>Search text when you use search features. Some natural-language searches may be processed by Groq to identify search criteria.</li>
         </ul>
       </section>
@@ -45,6 +46,16 @@ export default function PrivacyPage() {
           decisions and administrators can review history. Reports and moderation records
           may be kept as needed to investigate and document decisions. A specific
           retention period still needs to be established before this draft is finalized.
+        </p>
+      </section>
+      <section>
+        <h2 className="text-xl font-semibold text-stone-950 dark:text-white">Feedback</h2>
+        <p className="mt-3">
+          Feedback is available to SmallTown operators for app improvement. Providing an
+          email address is optional and is used only if a follow-up is helpful. Feedback
+          submissions are rate-limited; the IP address is hashed for temporary abuse
+          prevention and is not included in the feedback record. A specific feedback
+          retention period still needs to be established.
         </p>
       </section>
       <section>

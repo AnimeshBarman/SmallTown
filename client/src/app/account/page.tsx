@@ -5,8 +5,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import { useRouter } from "next/navigation";
 import { useState, useSyncExternalStore } from "react";
+import { googleLogout } from "@react-oauth/google";
 import { Eye, Heart, HeartOff, Home, Loader2, LogOut, MapPin, Pencil, Trash2, UserRound } from "lucide-react";
 import { api } from "@/lib/api";
+import { clearPrivateQueryCache } from "@/lib/private-query-cache";
 import { formatPostedAgo } from "@/lib/relative-time";
 import { getAuthSnapshot, getServerAuthSnapshot, notifyAuthChanged, subscribeToAuth } from "@/lib/auth-state";
 import { Button } from "@/components/ui/button";
@@ -133,17 +135,13 @@ export default function AccountPage() {
 
   const logoutMutation = useMutation({
     mutationFn: async () => api.post("/auth/logout"),
-    onSuccess: () => {
+    onSettled: (_data, error) => {
+      clearPrivateQueryCache(queryClient);
+      googleLogout();
       localStorage.removeItem("access_token");
       localStorage.removeItem("refresh_token");
       notifyAuthChanged();
-      router.replace("/");
-    },
-    onError: () => {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      notifyAuthChanged();
-      router.replace("/login?logout=failed");
+      router.replace(error ? "/login?logout=failed" : "/");
     },
   });
 
