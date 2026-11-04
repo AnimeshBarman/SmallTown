@@ -12,6 +12,7 @@ from api.properties import router as properties_router
 from api.auth import router as auth_router
 from api.search import router as search_router
 from api.moderation import router as moderation_router
+from api.feedback import router as feedback_router
 
 
 @asynccontextmanager
@@ -125,6 +126,7 @@ app.include_router(properties_router, prefix="/api/v1/properties", tags=["Proper
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(search_router, prefix="/api/v1/search", tags=["AI Search"])
 app.include_router(moderation_router, prefix="/api/v1", tags=["Moderation"])
+app.include_router(feedback_router, prefix="/api/v1/feedback", tags=["Feedback"])
 
 
 

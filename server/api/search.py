@@ -14,7 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import get_db
 from models.db_models import City, Property, Landmark
 from schemas.property_schema import PropertyResponse
-from schemas.search_schema import SearchRequest
+from schemas.search_schema import NearbySearchRequest, SearchRequest
 from services.ai_service import extract_search_intent, requires_ai_search_intent
 from redis_client import redis_client
 from rate_limiter import rate_limit_ai_search_miss, rate_limit_search_requests
@@ -130,3 +130,24 @@ async def ai_powered_search(
             status_code=503,
             detail="Natural-language search is temporarily unavailable. Please try again.",
         ) from None
+
+
+@router.post("/nearby", response_model=List[PropertyResponse], dependencies=[Depends(rate_limit_search_requests)])
+def search_nearby_places(
+    location: NearbySearchRequest,
+    limit: int = Query(24, ge=1, le=24),
+    db: Session = Depends(get_db),
+):
+    user_location = cast(
+        func.ST_SetSRID(func.ST_MakePoint(location.longitude, location.latitude), 4326),
+        Geography,
+    )
+    query = db.query(Property).filter(
+        Property.status == "active",
+        func.ST_DWithin(Property.coordinates, user_location, 2000),
+    )
+    return _property_rows(
+        db,
+        query.order_by(func.ST_Distance(Property.coordinates, user_location)),
+        limit=limit,
+    )

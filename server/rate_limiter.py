@@ -24,6 +24,8 @@ LISTING_REPORT_WINDOW_SECONDS = 60 * 60
 CONTACT_REVEAL_LIMIT_PER_USER = 20
 CONTACT_REVEAL_LIMIT_PER_IP = 60
 CONTACT_REVEAL_WINDOW_SECONDS = 60 * 60
+FEEDBACK_LIMIT_PER_IP = 5
+FEEDBACK_WINDOW_SECONDS = 60 * 60
 
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
 LOGIN_FAILURES_PER_IP = 30
@@ -153,6 +155,20 @@ async def rate_limit_search_requests(request: Request) -> None:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many search requests. Please wait a minute and try again.",
             headers={"Retry-After": str(SEARCH_REQUEST_WINDOW_SECONDS)},
+        )
+
+
+async def rate_limit_feedback(request: Request) -> None:
+    ip_hash = _digest(_client_ip(request))
+    count = await _increment_fixed_window(
+        f"rate_limit:feedback:ip:{ip_hash}",
+        FEEDBACK_WINDOW_SECONDS,
+    )
+    if count > FEEDBACK_LIMIT_PER_IP:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many feedback submissions. Please try again in an hour.",
+            headers={"Retry-After": str(FEEDBACK_WINDOW_SECONDS)},
         )
 
 
