@@ -14,7 +14,7 @@ from models.db_models import (
     ListingModerationAction,
     ListingReport,
     Profile,
-    Property,
+    Property as RentalProperty,
 )
 from rate_limiter import rate_limit_listing_report
 from services.storage_service import delete_images_from_storage
@@ -42,7 +42,7 @@ def _require_admin(current_user: Profile) -> None:
         )
 
 
-def _admin_property_data(property_record: Property, owner: Profile) -> dict:
+def _admin_property_data(property_record: RentalProperty, owner: Profile | None) -> dict:
     return {
         "id": property_record.id,
         "title": property_record.title,
@@ -54,8 +54,8 @@ def _admin_property_data(property_record: Property, owner: Profile) -> dict:
         "price": property_record.price,
         "image_urls": property_record.image_urls or [],
         "owner_id": property_record.owner_id,
-        "owner_name": owner.fullname,
-        "owner_email": owner.email,
+        "owner_name": owner.fullname if owner else None,
+        "owner_email": owner.email if owner else "Profile unavailable",
         "contact_phone": property_record.contact_phone,
         "status": property_record.status,
         "view_count": property_record.view_count,
@@ -78,9 +78,9 @@ async def create_listing_report(
 ):
     await rate_limit_listing_report(request, str(current_user.id))
 
-    property_record = db.query(Property).filter(
-        Property.id == property_id,
-        Property.status == "active",
+    property_record = db.query(RentalProperty).filter(
+        RentalProperty.id == property_id,
+        RentalProperty.status == "active",
     ).first()
     if property_record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found.")
@@ -136,26 +136,26 @@ def get_admin_properties(
 ):
     _require_admin(current_user)
 
-    query = db.query(Property, Profile).join(Profile, Profile.id == Property.owner_id)
+    query = db.query(RentalProperty, Profile).outerjoin(Profile, Profile.id == RentalProperty.owner_id)
     if city:
-        query = query.filter(func.lower(Property.city) == city.strip().lower())
+        query = query.filter(func.lower(RentalProperty.city) == city.strip().lower())
     if property_type:
-        query = query.filter(Property.type == property_type)
+        query = query.filter(RentalProperty.type == property_type)
     if listing_status != "all":
-        query = query.filter(Property.status == listing_status)
+        query = query.filter(RentalProperty.status == listing_status)
     if search:
         normalized_search = search.strip().lower()
         query = query.filter(or_(
-            func.lower(Property.title).contains(normalized_search, autoescape=True),
-            func.lower(func.coalesce(Property.area, "")).contains(normalized_search, autoescape=True),
-            func.lower(func.coalesce(Property.address, "")).contains(normalized_search, autoescape=True),
+            func.lower(RentalProperty.title).contains(normalized_search, autoescape=True),
+            func.lower(func.coalesce(RentalProperty.area, "")).contains(normalized_search, autoescape=True),
+            func.lower(func.coalesce(RentalProperty.address, "")).contains(normalized_search, autoescape=True),
             func.lower(Profile.email).contains(normalized_search, autoescape=True),
             func.lower(func.coalesce(Profile.fullname, "")).contains(normalized_search, autoescape=True),
         ))
 
     total = query.count()
     rows = (
-        query.order_by(Property.created_at.desc())
+        query.order_by(RentalProperty.created_at.desc())
         .limit(limit)
         .offset(offset)
         .all()
@@ -179,10 +179,10 @@ def get_admin_listing_cities(
     _require_admin(current_user)
     return [
         city
-        for (city,) in db.query(Property.city)
-        .filter(Property.city.isnot(None))
+        for (city,) in db.query(RentalProperty.city)
+        .filter(RentalProperty.city.isnot(None))
         .distinct()
-        .order_by(Property.city)
+        .order_by(RentalProperty.city)
         .all()
     ]
 
@@ -198,7 +198,7 @@ def update_admin_property_status(
     current_user: Profile = Depends(get_current_user),
 ):
     _require_admin(current_user)
-    property_record = db.query(Property).filter(Property.id == property_id).with_for_update().first()
+    property_record = db.query(RentalProperty).filter(RentalProperty.id == property_id).with_for_update().first()
     if property_record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found.")
 
@@ -232,8 +232,8 @@ async def permanently_delete_admin_property(
 ):
     _require_admin(current_user)
     property_record = (
-        db.query(Property)
-        .filter(Property.id == property_id)
+        db.query(RentalProperty)
+        .filter(RentalProperty.id == property_id)
         .with_for_update()
         .first()
     )
@@ -241,8 +241,6 @@ async def permanently_delete_admin_property(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found.")
 
     owner = db.query(Profile).filter(Profile.id == property_record.owner_id).first()
-    if owner is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing owner not found.")
 
     history = (
         db.query(ListingModerationAction, Profile.email)
@@ -253,11 +251,11 @@ async def permanently_delete_admin_property(
     )
     notice = ListingDeletionNotice(
         property_id=property_record.id,
-        owner_id=owner.id,
+        owner_id=owner.id if owner else None,
         admin_id=current_user.id,
         property_title=property_record.title,
         city=property_record.city,
-        owner_email=owner.email,
+        owner_email=owner.email if owner else "Profile unavailable",
         admin_email=current_user.email,
         reason=deletion_data.reason,
         moderation_history=[
@@ -307,7 +305,7 @@ def get_listing_moderation_history(
     current_user: Profile = Depends(get_current_user),
 ):
     _require_admin(current_user)
-    if not db.query(Property.id).filter(Property.id == property_id).first():
+    if not db.query(RentalProperty.id).filter(RentalProperty.id == property_id).first():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found.")
     rows = (
         db.query(ListingModerationAction, Profile.email)
@@ -338,8 +336,8 @@ def get_listing_reports(
     _require_admin(current_user)
 
     query = (
-        db.query(ListingReport, Property, Profile)
-        .join(Property, Property.id == ListingReport.property_id)
+        db.query(ListingReport, RentalProperty, Profile)
+        .join(RentalProperty, RentalProperty.id == ListingReport.property_id)
         .join(Profile, Profile.id == ListingReport.reporter_id)
     )
     if report_status != "all":
@@ -392,7 +390,7 @@ def update_listing_report(
     report.reviewed_by_id = current_user.id
     report.resolution_note = report_data.resolution_note or None
     if report_data.remove_listing:
-        property_record = db.query(Property).filter(Property.id == report.property_id).first()
+        property_record = db.query(RentalProperty).filter(RentalProperty.id == report.property_id).first()
         if property_record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found.")
         property_record.status = "removed"
@@ -408,7 +406,7 @@ def update_listing_report(
     db.commit()
     db.refresh(report)
 
-    property_record = db.query(Property).filter(Property.id == report.property_id).first()
+    property_record = db.query(RentalProperty).filter(RentalProperty.id == report.property_id).first()
     reporter = db.query(Profile).filter(Profile.id == report.reporter_id).first()
     if property_record is None or reporter is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report details are unavailable.")

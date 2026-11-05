@@ -3,6 +3,8 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import field_validator
+from image_urls import filter_trusted_property_image_urls
 
 
 ReportReason = Literal["suspicious", "inaccurate", "inappropriate", "other"]
@@ -79,7 +81,7 @@ class AdminPropertyResponse(BaseModel):
     type: str
     price: float
     image_urls: list[str]
-    owner_id: UUID
+    owner_id: UUID | None
     owner_name: str | None
     owner_email: str
     contact_phone: str | None
@@ -88,6 +90,11 @@ class AdminPropertyResponse(BaseModel):
     created_at: datetime
     moderation_reason: str | None
     moderated_at: datetime | None
+
+    @field_validator("image_urls", mode="before")
+    @classmethod
+    def filter_untrusted_image_urls(cls, values: object) -> list[str]:
+        return filter_trusted_property_image_urls(values)
 
 
 class AdminPropertyPageResponse(BaseModel):

@@ -5,6 +5,10 @@ from datetime import datetime
 from decimal import Decimal
 import re
 from pydantic import field_validator, model_validator
+from image_urls import (
+    filter_trusted_property_image_urls,
+    is_trusted_property_image_url,
+)
 
 class PropertyBase(BaseModel):
     title: str = Field(..., min_length=5, max_length=100, description="Property title")
@@ -21,6 +25,13 @@ class PropertyCreate(PropertyBase):
     longitude: float = Field(..., description="Map Longitude")
     contact_phone: str = Field(..., min_length=7, max_length=30)
     contact_sharing_consent: Literal[True]
+
+    @field_validator("image_urls")
+    @classmethod
+    def validate_image_urls(cls, values: list[str]) -> list[str]:
+        if any(not is_trusted_property_image_url(value) for value in values):
+            raise ValueError("Images must be uploaded to SmallTown's property image storage.")
+        return values
 
     @field_validator("contact_phone")
     @classmethod
@@ -78,6 +89,11 @@ class PropertyResponse(PropertyBase):
     view_count: int
     status: str
     created_at: datetime
+
+    @field_validator("image_urls", mode="before")
+    @classmethod
+    def filter_untrusted_image_urls(cls, values: object) -> list[str]:
+        return filter_trusted_property_image_urls(values)
 
 
 class PropertyDetailResponse(PropertyResponse):

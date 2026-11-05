@@ -1,23 +1,21 @@
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
-from dotenv import load_dotenv
-from pathlib import Path
 
 from database import get_db
 from models.db_models import Profile
-from security import (SECRET_KEY, ALGORITHM)
+from security import SECRET_KEY, ALGORITHM
 
-env_path = Path(__file__).parent / ".env"
-load_dotenv(dotenv_path=env_path)
-
-security = HTTPBearer()
+ACCESS_COOKIE_NAME = "smalltown_access"
 
 
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-# Validates the JWT and returns the Supabase user ID
-    token = credentials.credentials
+def verify_token(request: Request) -> str:
+    token = request.cookies.get(ACCESS_COOKIE_NAME)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication is required.",
+        )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("sub")

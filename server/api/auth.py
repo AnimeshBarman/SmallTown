@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -21,16 +21,16 @@ from schemas.user_schema import (
     ProfileCreate,
     UserSignup,
     TokenResponse,
-    RefreshRequest,
     ProfileResponse,
     ProfileUpdate,
 )
 from dependencies import (verify_token, get_current_user)
 from security import (
     get_password_hash, verify_password, create_access_token, 
-    create_refresh_token
+    create_refresh_token, hash_refresh_token, verify_refresh_token_hash,
 )
 from config import settings
+from dependencies import ACCESS_COOKIE_NAME
 from rate_limiter import (
     check_login_rate_limit,
     clear_login_identity_failures,
@@ -40,6 +40,41 @@ from rate_limiter import (
 router = APIRouter()
 DUMMY_PASSWORD_HASH = get_password_hash("smalltown-login-timing-equalization")
 PROFILE_NAME_CHANGE_LIMIT = 3
+REFRESH_COOKIE_NAME = "smalltown_refresh"
+ACCESS_COOKIE_PATH = "/api/v1"
+REFRESH_COOKIE_PATH = "/api/v1/auth"
+
+
+def _set_session_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+    cookie_options = {
+        "httponly": True,
+        "secure": settings.COOKIE_SECURE,
+        "samesite": "lax",
+    }
+    response.set_cookie(
+        ACCESS_COOKIE_NAME,
+        access_token,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path=ACCESS_COOKIE_PATH,
+        **cookie_options,
+    )
+    response.set_cookie(
+        REFRESH_COOKIE_NAME,
+        refresh_token,
+        max_age=7 * 24 * 60 * 60,
+        path=REFRESH_COOKIE_PATH,
+        **cookie_options,
+    )
+
+
+def _clear_session_cookies(response: Response) -> None:
+    cookie_options = {
+        "httponly": True,
+        "secure": settings.COOKIE_SECURE,
+        "samesite": "lax",
+    }
+    response.delete_cookie(ACCESS_COOKIE_NAME, path=ACCESS_COOKIE_PATH, **cookie_options)
+    response.delete_cookie(REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH, **cookie_options)
 
 
 def _name_change_quota(db: Session, user_id: uuid.UUID) -> dict:
@@ -120,16 +155,12 @@ def update_my_profile(
     return _profile_response(current_user, db)
 
 
-def _create_session_tokens(user: Profile, db: Session) -> dict[str, str]:
+def _create_session_tokens(user: Profile, db: Session) -> tuple[str, str]:
     access_token = create_access_token(data={"sub": str(user.id)})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
-    user.refresh_token = refresh_token
+    user.refresh_token = hash_refresh_token(refresh_token)
     db.commit()
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-    }
+    return access_token, refresh_token
 
 
 def _verify_login_credentials(
@@ -163,6 +194,7 @@ def signup(user_data: UserSignup, db: Session = Depends(get_db)):
 @router.post("/login", response_model=TokenResponse)
 async def login(
     request: Request,
+    response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
@@ -179,11 +211,18 @@ async def login(
         await record_login_failure(request, normalized_email)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials..!")
     await clear_login_identity_failures(request, normalized_email)
-    return await run_in_threadpool(_create_session_tokens, user, db)
-
+    _set_session_cookies(
+        response,
+        *await run_in_threadpool(_create_session_tokens, user, db),
+    )
+    return {"authenticated": True}
 
 @router.post("/google", response_model=TokenResponse)
-def google_login(request: GoogleLoginRequest, db: Session = Depends(get_db)):
+def google_login(
+    request: GoogleLoginRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+):
     if not settings.GOOGLE_CLIENT_ID:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -236,13 +275,20 @@ def google_login(request: GoogleLoginRequest, db: Session = Depends(get_db)):
         db.add(user)
         db.flush()
 
-    return _create_session_tokens(user, db)
+    _set_session_cookies(response, *_create_session_tokens(user, db))
+    return {"authenticated": True}
 
 @router.post("/refresh", response_model=TokenResponse)
-def refresh_token(request: RefreshRequest, db: Session = Depends(get_db)):
+def refresh_token(request: Request, response: Response, db: Session = Depends(get_db)):
+    presented_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not presented_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh session is missing.",
+        )
     try:
         payload = jwt.decode(
-            request.refresh_token,
+            presented_token,
             settings.JWT_SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM],
         )
@@ -255,17 +301,27 @@ def refresh_token(request: RefreshRequest, db: Session = Depends(get_db)):
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token..!")
         
-    user = db.query(Profile).filter(Profile.id == user_id).first()
-    if not user or user.refresh_token != request.refresh_token:
+    user = (
+        db.query(Profile)
+        .filter(Profile.id == user_id)
+        .with_for_update()
+        .first()
+    )
+    if not user or not verify_refresh_token_hash(presented_token, user.refresh_token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token revoked or invalid..!")
-        
-    new_access_token = create_access_token(data={"sub": str(user.id)})
-    return {"access_token": new_access_token, "refresh_token": user.refresh_token, "token_type": "bearer"}
+    access_token, refresh_token = _create_session_tokens(user, db)
+    _set_session_cookies(response, access_token, refresh_token)
+    return {"authenticated": True}
 
 @router.post("/logout")
-def logout(current_user: Profile = Depends(get_current_user), db: Session = Depends(get_db)):
+def logout(
+    response: Response,
+    current_user: Profile = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     current_user.refresh_token = None
     db.commit()
+    _clear_session_cookies(response)
     return {"message": "Successfully logged out."}
 
 @router.post("/sync-profile")

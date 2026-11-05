@@ -1,10 +1,12 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from contextlib import asynccontextmanager
 import uuid
 import uvicorn
+from config import settings
 from database import get_db, engine
 from models.db_models import Base
 
@@ -22,6 +24,7 @@ async def lifespan(app: FastAPI):
         Base.metadata.create_all(bind=conn)
         conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS address VARCHAR;"))
         conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS city VARCHAR;"))
+        conn.execute(text("ALTER TABLE feedback ADD COLUMN IF NOT EXISTS email VARCHAR;"))
         conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS contact_phone VARCHAR;"))
         conn.execute(text(
             "ALTER TABLE properties ADD COLUMN IF NOT EXISTS "
@@ -109,10 +112,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="Welcome to SmallTown Api", version="1.0.0")
 
-origins = [
-    "http://localhost:3000",
-    "http://192.168.1.8:3000",
-]
+origins = [settings.FRONTEND_ORIGIN.rstrip("/")]
+if not settings.COOKIE_SECURE:
+    origins.extend([
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://192.168.1.8:3000",
+    ])
 
 app.add_middleware(
     CORSMiddleware,
@@ -121,6 +127,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def require_same_origin_for_mutations(request: Request, call_next):
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        origin = request.headers.get("origin")
+        if not origin or origin.rstrip("/") not in origins:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Request origin is not allowed."},
+            )
+    return await call_next(request)
+
 
 app.include_router(properties_router, prefix="/api/v1/properties", tags=["Properties"])
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["Authentication"])

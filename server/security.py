@@ -1,5 +1,7 @@
 import uuid
 import bcrypt
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from jose import jwt
 from config import settings
@@ -45,5 +47,16 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
 def create_refresh_token(data: dict) -> str:
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    to_encode.update({"exp": expire, "type": "refresh"})
+    to_encode.update({"exp": expire, "jti": str(uuid.uuid4()), "type": "refresh"})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def hash_refresh_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def verify_refresh_token_hash(token: str, stored_hash: str | None) -> bool:
+    return bool(stored_hash) and hmac.compare_digest(
+        hash_refresh_token(token),
+        stored_hash,
+    )

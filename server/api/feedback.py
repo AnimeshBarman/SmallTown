@@ -8,9 +8,10 @@ from rate_limiter import rate_limit_feedback
 from schemas.feedback_schema import FeedbackCreate, FeedbackResponse
 
 
-router = APIRouter()
+router = APIRouter(redirect_slashes=False)
 
 
+@router.get("", response_model=list[FeedbackResponse])
 @router.get("/", response_model=list[FeedbackResponse])
 def list_feedback(
     limit: int = Query(50, ge=1, le=100),
@@ -25,6 +26,7 @@ def list_feedback(
     return db.query(Feedback).order_by(Feedback.created_at.desc()).limit(limit).all()
 
 
+@router.post("", status_code=status.HTTP_201_CREATED)
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def submit_feedback(
     feedback_data: FeedbackCreate,

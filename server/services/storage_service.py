@@ -8,6 +8,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 from supabase import create_client, Client
 from config import settings
+from image_urls import is_trusted_property_image_url
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,9 @@ def _delete_images_from_storage(image_urls: list[str]) -> None:
     filenames = []
 
     for image_url in image_urls:
+        if not is_trusted_property_image_url(image_url):
+            logger.warning("Skipped deletion of an image outside the configured property bucket.")
+            continue
         filename = unquote(urlsplit(image_url).path.rsplit("/", 1)[-1])
         if filename:
             filenames.append(filename)

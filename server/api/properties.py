@@ -541,7 +541,7 @@ def count_property_view(
             viewed_on=viewed_on,
         )
         .on_conflict_do_nothing()
-        .returning(PropertyView.id)
+        .returning(PropertyView.property_id)
     )
     if result.scalar_one_or_none() is not None:
         db.query(Property).filter(Property.id == property_id).update(
