@@ -131,7 +131,7 @@ export default function AdminPage() {
   const feedbackQuery = useQuery<AdminFeedback[]>({
     queryKey: ["admin", "feedback"],
     enabled: signedIn && profileQuery.data?.role === "admin",
-    queryFn: async () => (await api.get<AdminFeedback[]>("/feedback/", { params: { limit: 50 } })).data,
+    queryFn: async () => (await api.get<AdminFeedback[]>("/feedback", { params: { limit: 50 } })).data,
     staleTime: 30 * 1000,
   });
 
@@ -653,6 +653,13 @@ export default function AdminPage() {
                           autoComplete="off"
                           className="mt-1 h-9 bg-white dark:bg-stone-950"
                         />
+                        <p className="mt-2 text-xs text-stone-600 dark:text-stone-300" aria-live="polite">
+                          {!deletionReason.trim() || deletionReason.trim().length < 10
+                            ? "Enter a reason of at least 10 characters"
+                            : deletionConfirmation.trim() !== "DELETE"
+                              ? "Type DELETE exactly to enable permanent deletion"
+                              : "Ready to permanently delete this listing"}
+                        </p>
                         <div className="mt-3 flex justify-end gap-2">
                           <Button
                             type="button"

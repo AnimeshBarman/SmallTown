@@ -36,7 +36,7 @@ export default function FeedbackPage() {
 
   const feedbackMutation = useMutation({
     mutationFn: async () => {
-      const { data } = await api.post<{ message: string }>("/feedback/", {
+      const { data } = await api.post<{ message: string }>("/feedback", {
         category,
         message,
         email: email.trim() || null,

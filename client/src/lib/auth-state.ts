@@ -1,7 +1,9 @@
 const authChangedEvent = "smalltown-auth-changed";
+let authenticated = false;
+let authRevision = 0;
 
 export function isAuthenticated() {
-  return typeof window !== "undefined" && Boolean(localStorage.getItem("access_token"));
+  return authenticated;
 }
 
 export function subscribeToAuth(callback: () => void) {
@@ -15,7 +17,7 @@ export function subscribeToAuth(callback: () => void) {
 }
 
 export function getAuthSnapshot() {
-  return isAuthenticated();
+  return authenticated;
 }
 
 export function getServerAuthSnapshot() {
@@ -31,8 +33,20 @@ export function getServerLogoutWarningSnapshot() {
   return false;
 }
 
-export function notifyAuthChanged() {
+export function setAuthenticated(value: boolean) {
+  authenticated = value;
+  authRevision += 1;
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event(authChangedEvent));
+  }
+}
+
+export function getAuthRevision() {
+  return authRevision;
+}
+
+export function setAuthenticatedIfUnchanged(value: boolean, expectedRevision: number) {
+  if (authRevision === expectedRevision) {
+    setAuthenticated(value);
   }
 }

@@ -10,7 +10,7 @@ import { Eye, Heart, HeartOff, Home, Loader2, LogOut, MapPin, Pencil, Trash2, Us
 import { api } from "@/lib/api";
 import { clearPrivateQueryCache } from "@/lib/private-query-cache";
 import { formatPostedAgo } from "@/lib/relative-time";
-import { getAuthSnapshot, getServerAuthSnapshot, notifyAuthChanged, subscribeToAuth } from "@/lib/auth-state";
+import { getAuthSnapshot, getServerAuthSnapshot, setAuthenticated, subscribeToAuth } from "@/lib/auth-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -138,9 +138,7 @@ export default function AccountPage() {
     onSettled: (_data, error) => {
       clearPrivateQueryCache(queryClient);
       googleLogout();
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      notifyAuthChanged();
+      setAuthenticated(false);
       router.replace(error ? "/login?logout=failed" : "/");
     },
   });

@@ -10,7 +10,7 @@ import { clearPrivateQueryCache } from "@/lib/private-query-cache";
 import {
   getLogoutWarningSnapshot,
   getServerLogoutWarningSnapshot,
-  notifyAuthChanged,
+  setAuthenticated,
   subscribeToAuth,
 } from "@/lib/auth-state";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,7 @@ import { Building2, Loader2 } from "lucide-react";
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
 
-type AuthResponse = { access_token: string; refresh_token: string };
+type AuthResponse = { authenticated: boolean };
 
 function getErrorMessage(error: unknown) {
   if (isAxiosError<{ detail?: string }>(error)) {
@@ -43,11 +43,9 @@ export default function LoginPage() {
   );
   const isAuthenticating = useRef(false);
 
-  const finishLogin = useCallback((tokens: AuthResponse) => {
+  const finishLogin = useCallback(() => {
     clearPrivateQueryCache(queryClient);
-    localStorage.setItem("access_token", tokens.access_token);
-    localStorage.setItem("refresh_token", tokens.refresh_token);
-    notifyAuthChanged();
+    setAuthenticated(true);
 
     const returnTo = new URLSearchParams(window.location.search).get("next");
     const safeReturnTo = returnTo?.startsWith("/") && !returnTo.startsWith("//")
@@ -76,10 +74,11 @@ export default function LoginPage() {
       const loginForm = new URLSearchParams();
       loginForm.set("username", email);
       loginForm.set("password", password);
-      const { data } = await api.post<AuthResponse>("/auth/login", loginForm, {
+      const { data: session } = await api.post<AuthResponse>("/auth/login", loginForm, {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
       });
-      finishLogin(data);
+      if (!session.authenticated) throw new Error("Sign-in did not create a session.");
+      finishLogin();
     } catch (error: unknown) {
       setErrorMessage(getErrorMessage(error));
     } finally {
@@ -99,10 +98,11 @@ export default function LoginPage() {
     setErrorMessage("");
 
     try {
-      const { data } = await api.post<AuthResponse>("/auth/google", {
+      const { data: session } = await api.post<AuthResponse>("/auth/google", {
         id_token: credentialResponse.credential,
       });
-      finishLogin(data);
+      if (!session.authenticated) throw new Error("Sign-in did not create a session.");
+      finishLogin();
     } catch (error: unknown) {
       setErrorMessage(getErrorMessage(error));
     } finally {

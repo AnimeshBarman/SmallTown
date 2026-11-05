@@ -66,6 +66,31 @@ Existing listings default to not shared after the schema update; owners can enab
 withdraw sharing from the listing edit form. Contact reveals are capped at 20 per
 account and 60 per IP per hour.
 
+## Security deployment settings
+
+The browser does not receive SmallTown access or refresh tokens. The API sets
+`HttpOnly`, `SameSite=Lax` cookies; `COOKIE_SECURE` defaults to `true` and should
+remain enabled in production. For local HTTP development on a LAN address, set
+`COOKIE_SECURE=false` in the server environment. The API checks the request
+`Origin` on state-changing requests; set `FRONTEND_ORIGIN` to the exact public
+frontend origin in production. For local LAN testing with HTTP, `COOKIE_SECURE=false`
+also permits the existing localhost and `192.168.1.8:3000` development origins.
+
+For production, serve the frontend and API on the same origin. Set the Next.js
+server environment variable `API_INTERNAL_URL` to the private API origin (or use
+the platform's same-origin `/api/v1` reverse-proxy route). API requests from the
+browser use relative `/api/v1` URLs. `NEXT_PUBLIC_API_URL` is used as a server-side
+proxy fallback; do not point production browser requests directly at a separate
+API site.
+
+Next.js sends a restrictive `Content-Security-Policy-Report-Only` header and accepts
+sanitized reports at `/api/csp-report`. Review reports in the frontend server logs
+while exercising listing pages, maps, and Google sign-in before enforcing CSP.
+Configure `SUPABASE_URL` for the backend and expose the same public project URL to
+the Next.js build as `NEXT_PUBLIC_SUPABASE_URL` (or `SUPABASE_URL`) so image origins
+can be scoped narrowly. Listing image URLs are limited to UUID WebP objects in the
+`property-images` bucket.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More

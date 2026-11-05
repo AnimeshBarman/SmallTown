@@ -1,35 +1,22 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
+import { setAuthenticated } from "@/lib/auth-state";
 
 const API_VERSION_PATH = "/api/v1";
-const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "");
-const apiBaseUrl = configuredApiUrl?.endsWith(API_VERSION_PATH)
-  ? configuredApiUrl
-  : configuredApiUrl
-    ? `${configuredApiUrl}${API_VERSION_PATH}`
-    : undefined;
+
+declare module "axios" {
+  export interface AxiosRequestConfig {
+    _skipAuthRedirect?: boolean;
+  }
+}
 
 export const api = axios.create({
-  baseURL: apiBaseUrl,
+  baseURL: API_VERSION_PATH,
+  withCredentials: true,
 });
 
-api.interceptors.request.use(
-  (config) => {
-    if (typeof window !== "undefined") {
-      const token = localStorage.getItem("access_token");
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
+type RetriableRequestConfig = InternalAxiosRequestConfig & { _retry?: boolean };
 
-type RetriableRequestConfig = InternalAxiosRequestConfig & {
-  _retry?: boolean;
-};
-
-let refreshPromise: Promise<string> | null = null;
+let refreshPromise: Promise<void> | null = null;
 
 api.interceptors.response.use(
   (response) => response,
@@ -53,42 +40,24 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    const refreshToken = localStorage.getItem("refresh_token");
-    if (!refreshToken) {
-      localStorage.removeItem("access_token");
-      window.location.assign(new URL("/login", window.location.origin).toString());
-      return Promise.reject(error);
-    }
-
     originalRequest._retry = true;
 
     try {
       refreshPromise ??= api
-        .post<{ access_token: string; refresh_token?: string }>("/auth/refresh", {
-          refresh_token: refreshToken,
-        })
-        .then(({ data }) => {
-          localStorage.setItem("access_token", data.access_token);
-          if (data.refresh_token) {
-            localStorage.setItem("refresh_token", data.refresh_token);
-          }
-          return data.access_token;
-        })
+        .post("/auth/refresh", undefined, { _skipAuthRedirect: true })
+        .then(() => undefined)
         .finally(() => {
           refreshPromise = null;
         });
 
-      const accessToken = await refreshPromise;
-      originalRequest.headers.set("Authorization", `Bearer ${accessToken}`);
+      await refreshPromise;
       return api(originalRequest);
     } catch (refreshError: unknown) {
-      if (
-        axios.isAxiosError(refreshError) &&
-        refreshError.response?.status === 401
-      ) {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
-        window.location.assign(new URL("/login", window.location.origin).toString());
+      if (axios.isAxiosError(refreshError) && refreshError.response?.status === 401) {
+        setAuthenticated(false);
+        if (!originalRequest._skipAuthRedirect) {
+          window.location.assign(new URL("/login", window.location.origin).toString());
+        }
       }
 
       return Promise.reject(refreshError);
