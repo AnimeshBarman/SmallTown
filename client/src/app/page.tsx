@@ -39,7 +39,7 @@ export default function Home() {
       <section className="relative overflow-hidden bg-[#163d32] text-white">
         <div className="pointer-events-none absolute -right-24 -top-32 h-96 w-96 rounded-full bg-emerald-400/20 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-48 left-1/4 h-96 w-96 rounded-full bg-lime-300/10 blur-3xl" />
-        <div className="relative mx-auto grid max-w-7xl items-center gap-10 px-5 py-16 sm:px-8 sm:py-24 lg:grid-cols-[1.1fr_0.9fr] lg:py-28">
+        <div className="relative mx-auto grid max-w-7xl items-center gap-10 px-5 py-10 sm:px-8 sm:py-16 lg:grid-cols-[1.1fr_0.9fr] lg:py-20">
           <div className="max-w-2xl">
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-emerald-50">
               <MapPin size={15} /> Made for Cooch Behar

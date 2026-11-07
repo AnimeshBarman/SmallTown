@@ -615,13 +615,13 @@ export default function CreatePropertyPage() {
             </form>
           )}
 
-          {/* STEP 2: Client Compression & Multi-Image Upload */}
+          {/* STEP 2: Multi-Image Upload */}
           {step === 2 && (
             <CardContent className="space-y-6 pt-6">
               <CardHeader className="px-0 pt-0">
                 <CardTitle>Upload Room Photos (Up to 3)</CardTitle>
                 <CardDescription>
-                  Raw files up to <strong>9MB</strong> are accepted. They will automatically be compressed in your browser to &lt;2MB WebP format before being sent to the server.
+                  Don&apos;t upload files greater than 9 MB.
                 </CardDescription>
               </CardHeader>
 
@@ -666,7 +666,7 @@ export default function CreatePropertyPage() {
                   className="bg-emerald-700 text-white hover:bg-emerald-800"
                 >
                   {isUploading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
-                  {isUploading ? "Compressing & Uploading..." : "Compress & Continue"}
+                  {isUploading ? "Uploading..." : "Continue"}
                 </Button>
               </div>
             </CardContent>
@@ -678,7 +678,7 @@ export default function CreatePropertyPage() {
               <CardHeader className="px-0 pt-0">
                 <CardTitle>Review Listing</CardTitle>
                 <CardDescription>
-                  Your images are compressed and stored in Supabase Storage. Click publish to list your property.
+                  Your photos are ready. Review your listing, then publish it when you&apos;re ready.
                 </CardDescription>
               </CardHeader>
 
@@ -693,7 +693,6 @@ export default function CreatePropertyPage() {
 
               <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl text-sm space-y-1 text-emerald-900">
                 <p><span className="font-semibold">Images Uploaded:</span> {uploadedImageUrls.length} file(s)</p>
-                <p><span className="font-semibold">Storage Provider:</span> Supabase Cloud Bucket</p>
               </div>
 
               <div className="flex justify-between pt-4">
